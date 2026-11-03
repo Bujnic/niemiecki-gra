@@ -16,7 +16,7 @@ function h(tag, attrs, ...children) {
       else el.setAttribute(k, v === true ? "" : v);
     }
   }
-  for (const c of children.flat()) {
+  for (const c of children.flat(2)) {
     if (c == null || c === false) continue;
     el.append(c instanceof Node ? c : document.createTextNode(String(c)));
   }
@@ -33,7 +33,9 @@ const shuffle = (arr) => {
 };
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const uniq = (arr) => [...new Set(arr)];
+const range = (n) => Array.from({ length: n }, (_, i) => i);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
 function makeDeck(items) {
   let deck = [];
@@ -43,27 +45,48 @@ function makeDeck(items) {
   };
 }
 
+/* Podświetla podmioty (pierwsze wystąpienie każdego) w zdaniu. Zwraca HTML. */
+function markSubjects(sentence, subj) {
+  let out = esc(sentence);
+  for (const s of uniq(subj || [])) {
+    const re = new RegExp(`(^|[^\\wäöüÄÖÜß])(${esc(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})(?=[^\\wäöüÄÖÜß]|$)`);
+    out = out.replace(re, `$1<mark class="subj">$2</mark>`);
+  }
+  return out;
+}
+
 /* ================= Words ================= */
 
 const WORDS = [];
-for (const set of VOCAB) {
-  for (const line of set.words) {
-    const [deRaw, plRaw] = line.split("|").map((s) => s.trim());
-    if (!deRaw || !plRaw) continue;
-    const plural = /\(pl\)\s*$/.test(deRaw);
-    const de = deRaw.replace(/\s*\(pl\)\s*$/, "");
-    const m = de.match(/^(der|die|das) (\S.*)$/);
-    WORDS.push({
-      key: de,
-      de,
-      pl: plRaw,
-      set: set.id,
-      art: m && !plural ? m[1] : null,
-      noun: m ? m[2] : null,
-    });
+const SET_NAMES = {};
+function rebuildWords() {
+  WORDS.length = 0;
+  for (const set of VOCAB) {
+    SET_NAMES[set.id] = set.name;
+    for (const line of set.words) {
+      const w = parseWord(line, set.id);
+      if (w) WORDS.push(w);
+    }
   }
 }
-const SET_NAMES = Object.fromEntries(VOCAB.map((s) => [s.id, s.name]));
+function parseWord(line, setId) {
+  const [deRaw, plRaw, emo] = line.split("|").map((s) => s.trim());
+  if (!deRaw || !plRaw) return null;
+  const plural = /\(pl\)\s*$/.test(deRaw);
+  const de = deRaw.replace(/\s*\(pl\)\s*$/, "");
+  const m = de.match(/^(der|die|das) (\S.*)$/);
+  return {
+    key: de,
+    de,
+    pl: plRaw,
+    set: setId,
+    art: m && !plural ? m[1] : null,
+    noun: m ? m[2] : null,
+    emoji: emo || (typeof EMOJI !== "undefined" && EMOJI[de]) || "",
+  };
+}
+rebuildWords();
+const wordByKey = (k) => WORDS.find((w) => w.key === k);
 
 /* ================= Storage ================= */
 
@@ -77,7 +100,7 @@ const defaults = () => ({
   srs: {},
   best: {},
   rpg: { done: [] },
-  settings: { dir: "de-pl", sets: VOCAB.map((s) => s.id), sound: true, flashCount: 20 },
+  settings: { dir: "de-pl", sets: VOCAB.map((s) => s.id), sound: true, counts: {}, prefixPl: false },
 });
 
 let S = load();
@@ -87,7 +110,10 @@ function load() {
     const raw = JSON.parse(localStorage.getItem(STORE_KEY));
     if (!raw) return defaults();
     const d = defaults();
-    return { ...d, ...raw, settings: { ...d.settings, ...raw.settings }, rpg: { ...d.rpg, ...raw.rpg } };
+    const s = { ...d, ...raw, settings: { ...d.settings, ...raw.settings }, rpg: { ...d.rpg, ...raw.rpg } };
+    if (s.settings.flashCount != null && s.settings.counts.flash == null) s.settings.counts.flash = s.settings.flashCount;
+    delete s.settings.flashCount;
+    return s;
   } catch (e) {
     return defaults();
   }
@@ -127,8 +153,9 @@ function srsRecord(key, ok) {
   save();
 }
 function activeWords() {
-  const sets = S.settings.sets.length ? S.settings.sets : VOCAB.map((s) => s.id);
-  return WORDS.filter((w) => sets.includes(w.set));
+  const ids = Object.keys(SET_NAMES);
+  const sets = S.settings.sets.filter((s) => ids.includes(s));
+  return WORDS.filter((w) => (sets.length ? sets : ids).includes(w.set));
 }
 function dueWords(pool = activeWords()) {
   const now = Date.now();
@@ -168,20 +195,21 @@ function pickVoice() {
   if (!("speechSynthesis" in window)) return;
   const voices = speechSynthesis.getVoices();
   deVoice = voices.find((v) => v.lang === "de-DE" && /Anna|Helena|Markus|Google/i.test(v.name)) ||
-    voices.find((v) => v.lang && v.lang.startsWith("de")) || null;
+    voices.find((v) => v.lang && v.lang.replace("_", "-").startsWith("de")) || null;
 }
 if ("speechSynthesis" in window) {
   pickVoice();
   speechSynthesis.onvoiceschanged = pickVoice;
 }
-function speak(text) {
+function speak(text, rate = 0.92) {
   if (!("speechSynthesis" in window)) return toast("Brak syntezy mowy");
   speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text.replace(/\(.*?\)/g, ""));
   u.lang = "de-DE";
   if (deVoice) u.voice = deVoice;
-  u.rate = 0.92;
+  u.rate = rate;
   speechSynthesis.speak(u);
+  return u;
 }
 
 /* ================= UI shell ================= */
@@ -204,6 +232,7 @@ function show(title, render, back = home) {
   onBack = back;
   backBtn.hidden = !back;
   screenEl.innerHTML = "";
+  screenEl.className = "";
   screenEl.scrollTop = 0;
   render(screenEl);
 }
@@ -221,20 +250,509 @@ function toast(msg) {
   toastTimer = setTimeout(() => (t.hidden = true), 1800);
 }
 
+/* ================= Shared setup screen ================= */
+/*
+  countPicker: presety + pole liczby + / −, zapamiętane w S.settings.counts[id].
+  Wartość 0 = „Wszystkie”. Zmiany nie przerysowują ekranu (brak skoku na górę).
+*/
+function countValue(id, c) {
+  const v = S.settings.counts[id];
+  return v == null ? c.def : v;
+}
+function countFor(id, c, available) {
+  const v = countValue(id, c);
+  const max = c.all === false ? c.max : available;
+  return v > 0 ? clamp(v, c.min || 1, max) : max;
+}
+
+function countPicker(id, c, onChange) {
+  const presets = h("div");
+  const input = h("input", {
+    class: "num-input", type: "number", inputmode: "numeric", min: String(c.min || 1),
+    autocomplete: "off", "aria-label": c.label,
+  });
+  const set = (n) => { S.settings.counts[id] = n; save(); refresh(); onChange && onChange(); };
+  for (const n of c.presets) {
+    presets.append(h("button", { class: "pill", "data-n": n, onclick: () => set(n) }, n ? `${n}${c.unit || ""}` : "Wszystkie"));
+  }
+  const step = (d) => {
+    const max = c.all === false ? c.max : Math.max(1, c.available());
+    const cur = countValue(id, c) > 0 ? countValue(id, c) : max;
+    set(clamp(cur + d, c.min || 1, max));
+  };
+  input.addEventListener("input", () => {
+    const v = parseInt(input.value, 10);
+    if (v > 0) { S.settings.counts[id] = v; save(); refreshButtons(); onChange && onChange(); }
+  });
+  input.addEventListener("blur", refresh);
+
+  function refreshButtons() {
+    const v = countValue(id, c);
+    for (const b of presets.children) b.classList.toggle("on", Number(b.dataset.n) === v);
+  }
+  function refresh() {
+    refreshButtons();
+    const v = countValue(id, c);
+    if (document.activeElement !== input) input.value = v > 0 ? v : "";
+    input.placeholder = c.all === false ? "" : `wszystkie (${c.available()})`;
+  }
+  refresh();
+  const el = h("div", null,
+    presets,
+    h("div", { class: "stepper" },
+      h("button", { class: "icon-btn", "aria-label": "Mniej", onclick: () => step(-(c.step || 5)) }, "−"),
+      input,
+      h("button", { class: "icon-btn", "aria-label": "Więcej", onclick: () => step(c.step || 5) }, "+")
+    )
+  );
+  return { el, refresh };
+}
+
+function dirPills(onChange) {
+  const wrap = h("div");
+  for (const [v, label] of [["de-pl", "Niemiecki → polski"], ["pl-de", "Polski → niemiecki"]]) {
+    const b = h("button", { class: `pill ${S.settings.dir === v ? "on" : ""}` }, label);
+    b.addEventListener("click", () => {
+      S.settings.dir = v;
+      save();
+      for (const x of wrap.children) x.classList.toggle("on", x === b);
+      onChange && onChange();
+    });
+    wrap.append(b);
+  }
+  return wrap;
+}
+
+function setPills(onChange) {
+  const btns = {};
+  const ids = () => Object.keys(SET_NAMES);
+  const sync = () => { for (const id in btns) btns[id].classList.toggle("on", S.settings.sets.includes(id)); };
+  const all = h("button", { class: "pill" }, "Wszystkie / żadne");
+  all.addEventListener("click", () => {
+    S.settings.sets = S.settings.sets.length >= ids().length ? [] : ids();
+    save();
+    sync();
+    onChange && onChange();
+  });
+  for (const id of ids()) {
+    const n = WORDS.filter((w) => w.set === id).length;
+    const b = h("button", { class: "pill" }, `${SET_NAMES[id]} (${n})`);
+    b.addEventListener("click", () => {
+      const on = S.settings.sets.includes(id);
+      S.settings.sets = on ? S.settings.sets.filter((x) => x !== id) : [...S.settings.sets, id];
+      save();
+      sync();
+      onChange && onChange();
+    });
+    btns[id] = b;
+  }
+  sync();
+  return h("div", null, all, Object.values(btns));
+}
+
+function togglePill(label, getter, setter, onChange) {
+  const b = h("button", { class: `pill ${getter() ? "on" : ""}` }, label);
+  b.addEventListener("click", () => {
+    setter(!getter());
+    save();
+    b.classList.toggle("on", getter());
+    onChange && onChange();
+  });
+  return b;
+}
+
+/*
+  setupScreen(cfg)
+  cfg: { id, title, back, info(): Node|string, count: {label, presets, def, available(), unit, all, max, min, step},
+         sets, dir, options(refresh): Node[], buttons: [{ label(n), cls, run(n), available() }], footer(): Node }
+*/
+function setupScreen(cfg) {
+  show(cfg.title, (el) => {
+    const info = h("div", { class: "card" });
+    const btns = cfg.buttons.map((b) => {
+      const e = h("button", { class: `btn ${b.cls || "primary"}` });
+      return { b, e };
+    });
+    const avail = (b) => (b.available ? b.available() : cfg.count.available ? cfg.count.available() : cfg.count.max);
+    function refresh() {
+      if (cfg.info) {
+        info.innerHTML = "";
+        info.append(cfg.info());
+      }
+      picker.refresh();
+      for (const { b, e } of btns) {
+        const n = countFor(cfg.id, cfg.count, avail(b));
+        e.textContent = b.label(n);
+        e.disabled = !(n > 0);
+      }
+    }
+    const picker = countPicker(cfg.id, cfg.count, () => refresh());
+    for (const { b, e } of btns) {
+      e.addEventListener("click", () => {
+        const n = countFor(cfg.id, cfg.count, avail(b));
+        if (n > 0) b.run(n);
+      });
+    }
+    if (cfg.info) el.append(info);
+    el.append(h("div", { class: "section-title" }, cfg.count.label), picker.el);
+    if (cfg.dir) el.append(h("div", { class: "section-title" }, "Kierunek"), dirPills(refresh));
+    if (cfg.options) el.append(...cfg.options(refresh));
+    if (cfg.sets) el.append(h("div", { class: "section-title" }, "Działy słówek (wspólne dla wszystkich trybów)"), setPills(refresh));
+    el.append(h("div", { style: "height:8px" }), ...btns.map((x) => x.e));
+    if (cfg.footer) el.append(cfg.footer());
+    refresh();
+  }, cfg.back || home);
+}
+
+/* ================= Explanations ================= */
+
+const RULES = Object.fromEntries(CHEATSHEET.map((c) => [c.id, c]));
+
+function ruleButton(ruleId) {
+  const r = RULES[ruleId];
+  if (!r) return null;
+  const box = h("div", { class: "rule-box", hidden: true }, h("h3", null, r.title), h("div", { html: r.body }));
+  const b = h("button", { class: "btn small ghost", style: "margin-top:10px" }, "Reguła ze Ściągi ▾");
+  b.addEventListener("click", () => {
+    box.hidden = !box.hidden;
+    b.textContent = box.hidden ? "Reguła ze Ściągi ▾" : "Ukryj regułę ▴";
+  });
+  return h("div", null, b, box);
+}
+
+/* res: { ok, given, expected, alt, explain (html), pickedWhy, rule, after (html) } */
+function feedbackEl(res) {
+  return h("div", { class: `feedback pop ${res.ok ? "" : "bad"}` },
+    h("div", { class: "title" },
+      res.ok ? (res.alt ? `Dobrze! Częściej: ${res.expected}` : "Dobrze!") : res.expected != null ? `Poprawnie: ${res.expected}` : "Nie tym razem"),
+    !res.ok && res.given != null && res.given !== "" ? h("div", { class: "picked" },
+      h("span", { class: "muted" }, "Twoja odpowiedź: "), h("b", null, res.given),
+      res.pickedWhy ? h("div", { class: "why-not" }, res.pickedWhy) : null) : null,
+    res.explain ? h("div", { class: "explain", html: res.explain }) : null,
+    res.after ? h("div", { class: "after", html: res.after }) : null,
+    res.rule ? ruleButton(res.rule) : null
+  );
+}
+
+/* ================= Session engine ================= */
+/*
+  runSession(cfg)
+  cfg: { key, title, back, again, steps: [] | gen(i), n, lives, seconds, intro, onFinish(result, body) }
+  step: { kind: "mcq" | "builder" | "prefix", ...dane }; renderer woła ctx.done(res).
+*/
+const RENDERERS = {};
+
+function runSession(cfg) {
+  const back = cfg.back || home;
+  show(cfg.title, (el) => {
+    let i = 0, score = 0, lives = cfg.lives || 0, combo = 0, xpGained = 0, answered = 0;
+    let timeLeft = cfg.seconds || 0, timerId = null, finished = false;
+    const total = cfg.steps ? cfg.steps.length : cfg.n || 0;
+
+    const hud = h("div", { class: "hud" });
+    const body = h("div");
+    el.append(hud, body);
+
+    if (cfg.seconds) {
+      timerId = setInterval(() => {
+        timeLeft--;
+        renderHud();
+        if (timeLeft <= 0) finish();
+      }, 1000);
+      cleanup = () => clearInterval(timerId);
+    }
+
+    function renderHud() {
+      hud.innerHTML = "";
+      if (cfg.seconds) {
+        hud.append(h("div", { class: "bar" }, h("i", { style: `width:${(timeLeft / cfg.seconds) * 100}%` })), h("span", { class: "timer" }, `${timeLeft}s`));
+      } else if (total) {
+        hud.append(h("span", null, `${Math.min(i + 1, total)}/${total}`), h("div", { class: "bar" }, h("i", { style: `width:${(i / total) * 100}%` })));
+      }
+      if (cfg.lives) hud.append(h("span", { class: "hearts" }, "♥".repeat(Math.max(0, lives)) + "♡".repeat(Math.max(0, cfg.lives - lives))));
+      hud.append(h("span", null, `${score} pkt`));
+      if (combo >= 3) hud.append(h("span", { class: "combo" }, `x${combo}`));
+    }
+
+    const outOfLives = () => cfg.lives && lives <= 0;
+
+    function next() {
+      if (finished) return;
+      if (total && i >= total) return finish();
+      if (outOfLives()) return finish();
+      const step = cfg.steps ? cfg.steps[i] : cfg.gen(i);
+      renderHud();
+      body.innerHTML = "";
+      const stage = h("div", { class: "stage" });
+      body.append(stage);
+      let doneOnce = false;
+      RENDERERS[step.kind](stage, step, {
+        timed: !!cfg.seconds,
+        done: (res) => {
+          if (doneOnce || finished) return;
+          doneOnce = true;
+          result(step, res, stage);
+        },
+      });
+    }
+
+    function result(step, res, stage) {
+      answered++;
+      beep(res.ok);
+      if (step.onResult) step.onResult(res.ok);
+      if (res.ok) {
+        combo++;
+        score++;
+        const gain = (step.xp || 10) + (combo >= 3 ? 5 : 0);
+        xpGained += gain;
+        addXP(gain);
+      } else {
+        combo = 0;
+        if (cfg.lives) lives--;
+      }
+      i++;
+      renderHud();
+
+      if (cfg.seconds) {
+        setTimeout(() => (outOfLives() ? finish() : next()), res.ok ? 350 : 900);
+        return;
+      }
+      const fb = feedbackEl(res);
+      const nextBtn = h("button", { class: "btn primary", style: "margin-top:14px" }, total && i >= total ? "Wynik" : "Dalej");
+      nextBtn.addEventListener("click", () => (outOfLives() ? finish() : next()));
+      stage.append(fb, nextBtn);
+      if (res.ok && !res.explain && !res.after) setTimeout(() => nextBtn.isConnected && nextBtn.click(), 700);
+      else nextBtn.scrollIntoView({ behavior: "smooth", block: "end" });
+    }
+
+    function finish() {
+      if (finished) return;
+      finished = true;
+      if (timerId) clearInterval(timerId);
+      const record = cfg.key ? setBest(cfg.key, score) : false;
+      const result = { score, answered, total: total || answered, xp: xpGained };
+      body.innerHTML = "";
+      hud.innerHTML = "";
+      body.append(
+        h("div", { class: "card center pop" },
+          h("div", { class: "muted" }, cfg.seconds ? "Koniec czasu!" : outOfLives() ? "Koniec żyć!" : "Koniec rundy"),
+          h("div", { class: "result-big" }, total ? `${score}/${total}` : `${score}`),
+          h("div", null, `+${xpGained} XP`),
+          record ? h("div", { style: "color:var(--gold);font-weight:800;margin-top:6px" }, "Nowy rekord!") :
+            cfg.key && S.best[cfg.key] != null ? h("div", { class: "muted" }, `Rekord: ${S.best[cfg.key]}`) : null
+        )
+      );
+      if (cfg.onFinish) cfg.onFinish(result, body);
+      else body.append(
+        h("button", { class: "btn primary", onclick: cfg.again || (() => runSession(cfg)) }, "Jeszcze raz"),
+        h("button", { class: "btn ghost", onclick: back }, "Menu")
+      );
+    }
+
+    if (cfg.intro) {
+      body.append(cfg.intro, h("button", { class: "btn primary", onclick: next }, "Zaczynamy"));
+      renderHud();
+    } else next();
+  }, back);
+}
+
+/* ---------- MCQ renderer ---------- */
+/* step: { kind:"mcq", prompt, options, correct[], explain, after, rule, whyNot(opt), cols, big } */
+RENDERERS.mcq = (el, q, ctx) => {
+  const opts = h("div", { class: `options ${q.cols ? "cols-" + q.cols : ""} ${q.big ? "big" : ""}` });
+  el.append(h("div", { class: "prompt pop", html: q.prompt }), opts);
+  let locked = false;
+  for (const o of q.options) {
+    const b = h("button", { class: "opt" }, o);
+    b.addEventListener("click", () => {
+      if (locked) return;
+      locked = true;
+      const ok = q.correct.includes(o);
+      for (const x of opts.children) {
+        if (q.correct.includes(x.textContent)) x.classList.add("ok");
+        else if (x === b) x.classList.add("bad");
+        else x.classList.add("dim");
+      }
+      if (!ok) opts.classList.add("shake");
+      ctx.done({
+        ok,
+        given: o,
+        expected: q.correct[0],
+        alt: ok && q.correct.length > 1 && o !== q.correct[0],
+        explain: q.explain,
+        after: q.after,
+        rule: q.rule,
+        pickedWhy: !ok && q.whyNot ? q.whyNot(o) : null,
+      });
+    });
+    opts.append(b);
+  }
+};
+
+/* ================= Question generators ================= */
+
+const gapHTML = (s) => esc(s).replace("___", '<span class="gap">&nbsp;?&nbsp;</span>');
+const emojiAfter = (w) => (w.emoji ? `<span class="emo">${w.emoji}</span> ` : "");
+
+function mcqVocab(w, pool, dir = S.settings.dir) {
+  const toPl = dir === "de-pl";
+  const others = shuffle(pool.filter((x) => x.key !== w.key && x.pl !== w.pl && x.de !== w.de));
+  const sameSet = others.filter((x) => x.set === w.set);
+  const distract = uniq([...sameSet, ...others].map((x) => (toPl ? x.pl : x.de))).filter((x) => x !== (toPl ? w.pl : w.de)).slice(0, 3);
+  const correct = toPl ? w.pl : w.de;
+  return {
+    kind: "mcq",
+    prompt: `<div class="big">${esc(toPl ? w.de : w.pl)}</div><div class="hint">${esc(SET_NAMES[w.set] || "")}</div>`,
+    options: shuffle([correct, ...distract]),
+    correct: [correct],
+    after: w.emoji ? `${emojiAfter(w)}<b>${esc(w.de)}</b> – ${esc(w.pl)}` : null,
+    onResult: (ok) => srsRecord(w.key, ok),
+  };
+}
+function vocabGen(pool, dir) {
+  const deck = makeDeck(pool);
+  return () => {
+    const due = dueWords(pool);
+    const w = due.length && Math.random() < 0.4 ? pick(due) : deck();
+    return mcqVocab(w, pool, dir);
+  };
+}
+
+const nouns = () => WORDS.filter((w) => w.art);
+function mcqArticle(w) {
+  return {
+    kind: "mcq",
+    prompt: `<div class="big">${w.emoji ? `<span class="emo">${w.emoji}</span> ` : ""}${esc(w.noun)}</div><div class="hint">${esc(w.pl)}</div>`,
+    options: ["der", "die", "das"],
+    correct: [w.art],
+    explain: `<b>${esc(w.de)}</b> – ${esc(w.pl)}`,
+    cols: 3,
+    big: true,
+  };
+}
+
+function mcqColloc(i) {
+  const c = COLLOCATIONS[i];
+  const valid = COLLOCATIONS.filter((x) => x.stem === c.stem).map((x) => x.gap);
+  const distract = shuffle(uniq(COLLOCATIONS.map((x) => x.gap)).filter((g) => !valid.includes(g))).slice(0, 3);
+  return {
+    kind: "mcq",
+    prompt: `<div class="sent">${gapHTML(c.stem)}</div><div class="hint">${esc(c.pl)}</div>`,
+    options: shuffle([c.gap, ...distract]),
+    correct: [c.gap],
+    explain: `<b>${esc(c.stem.replace("___", c.gap))}</b> – ${esc(c.pl)}`,
+    cols: 2,
+  };
+}
+
+const CONNECTOR_OPTS = ["dass", "zu", "um … zu", "damit", "anstatt … zu", "anstatt dass", "ohne … zu", "ohne dass"];
+const MEANING = (o) => (/um|damit/.test(o) ? "cel" : /anstatt/.test(o) ? "zamiast" : /ohne/.test(o) ? "bez" : "że");
+const MEANING_PL = { cel: "„żeby” (cel)", zamiast: "„zamiast”", bez: "„bez / nie robiąc czegoś”", "że": "„że”" };
+const isZuForm = (o) => o === "zu" || o.includes("… zu");
+
+function mcqConnector(i) {
+  const c = CONNECTORS[i];
+  const same = c.same != null ? c.same : c.answers.some(isZuForm);
+  const m = MEANING(c.answers[0]);
+  const whyNot = (o) => {
+    if (MEANING(o) !== m) return `„${o}” znaczy ${MEANING_PL[MEANING(o)]}, a tu chodzi o ${MEANING_PL[m]}.`;
+    if (isZuForm(o) && !same) return `Forma z zu wymaga tego samego podmiotu, a tu podmioty są różne (${c.subj[0]} / ${c.subj[1]}).`;
+    return "Przy tym samym podmiocie używamy formy z zu.";
+  };
+  return {
+    kind: "mcq",
+    prompt: `<div class="two-sent"><div>${esc(c.a)}</div><div>${esc(c.b)}</div></div><div class="hint">Jak połączysz te zdania?</div>`,
+    options: CONNECTOR_OPTS,
+    correct: c.answers,
+    cols: 2,
+    rule: c.rule,
+    whyNot,
+    explain: `<div class="two-sent small"><div>${markSubjects(c.a, [c.subj[0]])}</div><div>${markSubjects(c.b, [c.subj[1]])}</div></div>` +
+      `<i>${esc(c.full)}</i><div class="why">${esc(c.why)}</div>`,
+  };
+}
+
+const GAP_OPTS = ["zu", "um", "damit", "anstatt", "ohne", "dass"];
+const GAP_NO = {
+  zu: "„zu” stoi tylko bezpośrednio przed bezokolicznikiem – samo nie łączy zdań.",
+  um: "„um … zu” wyraża cel (żeby …) i wymaga na końcu zu + bezokolicznika.",
+  damit: "„damit” (żeby) wymaga własnego podmiotu i odmienionego czasownika na końcu – nigdy nie łączy się z zu.",
+  anstatt: "„anstatt” znaczy „zamiast” – w tym zdaniu sens jest inny.",
+  ohne: "„ohne” znaczy „bez / nie robiąc czegoś” – w tym zdaniu sens jest inny.",
+  dass: "„dass” (że) wprowadza zdanie z własnym podmiotem i odmienionym czasownikiem na końcu – nie łączy się z zu.",
+};
+function mcqGap(i) {
+  const g = GAPS[i];
+  const cap = /^[A-ZÄÖÜ]/.test(g.a);
+  const fix = (o) => (cap ? o[0].toUpperCase() + o.slice(1) : o);
+  return {
+    kind: "mcq",
+    prompt: `<div class="sent">${gapHTML(g.s)}</div>`,
+    options: (g.opts || GAP_OPTS).map(fix),
+    correct: [g.a],
+    cols: 3,
+    rule: g.rule,
+    whyNot: (o) => GAP_NO[o.toLowerCase()] || null,
+    explain: `<i>${markSubjects(g.s.replace("___", "[[" + g.a + "]]"), g.subj).replace(/\[\[(.+?)\]\]/, "<b class=\"ans\">$1</b>")}</i><div class="why">${esc(g.why)}</div>`,
+  };
+}
+
+const zuKind = (o) => (o.startsWith("zu ") ? "spaced" : o.indexOf("zu", 1) > 0 ? "glued" : "bare");
+function mcqZu(i) {
+  const z = ZU_ITEMS[i];
+  const correct = z.opts[0];
+  const ck = zuKind(correct);
+  const whyNot = (o) => {
+    const k = zuKind(o);
+    if (ck === "bare") return `Tu nie ma zu: ${z.why}`;
+    if (ck === "glued" && k === "spaced") return `Przy czasowniku rozdzielnym zu wchodzi do środka: „${correct}”, nie „${o}”.`;
+    if (k === "bare") return `Brakuje zu. ${z.why}`;
+    return z.why;
+  };
+  return {
+    kind: "mcq",
+    prompt: `<div class="sent">${gapHTML(z.s)}</div>`,
+    options: shuffle(z.opts),
+    correct: [correct],
+    rule: z.rule,
+    whyNot,
+    explain: `<i>${esc(z.s.replace("___", correct))}</i><div class="why">${esc(z.why)}</div>`,
+  };
+}
+
+const BINS = {
+  zer: { name: "zer- : zniszczenie", desc: "rozpadło się, zepsuło", reason: "zer- = zniszczenie, rozpad na kawałki" },
+  verFehler: { name: "ver- : błąd, pomyłka", desc: "zrobione niewłaściwie", reason: "ver- = coś zrobione źle, pomyłka" },
+  verWeg: { name: "ver- : oddalenie", desc: "opuszczenie, zniknięcie", reason: "ver- = oddalenie, opuszczenie" },
+};
+function mcqPrefix(i) {
+  const p = PREFIX_ITEMS[i];
+  return {
+    kind: "mcq",
+    prompt: `<div class="big">${esc(p.w)}</div><div class="hint">Co oznacza przedrostek?</div>`,
+    options: Object.values(BINS).map((b) => b.name),
+    correct: [BINS[p.bin].name],
+    rule: p.bin === "zer" ? "zer" : "ver",
+    explain: `<b>${esc(p.w)}</b> – ${esc(p.pl)}: ${esc(BINS[p.bin].reason)}`,
+  };
+}
+
+const deckOf = (n) => makeDeck(range(n));
+
 /* ================= Home ================= */
 
 const MODES = [
   { id: "flash", name: "Fiszki", desc: "Powtórki w odstępach czasu", badge: "DE", color: "#f5b301", run: () => flashSetup() },
-  { id: "quiz", name: "Quiz słówek", desc: "4 odpowiedzi, 10 pytań", badge: "?", color: "#60a5fa", run: () => quizVocab() },
-  { id: "memory", name: "Memory", desc: "Znajdź pary DE–PL", badge: "▦", color: "#a78bfa", run: () => memoryGame() },
-  { id: "article", name: "der / die / das", desc: "60 sekund, ile zdążysz", badge: "der", color: "#f87171", run: () => articleGame() },
-  { id: "colloc", name: "Kolokacje", desc: "Angebot + unterbreiten…", badge: "+", color: "#34d399", run: () => collocGame() },
-  { id: "conn", name: "Łączenie zdań", desc: "damit, um…zu, ohne, anstatt", badge: "⇄", color: "#fb923c", run: () => connectorGame() },
-  { id: "gaps", name: "Luki", desc: "zu / um / damit / ohne / anstatt", badge: "__", color: "#f472b6", run: () => gapGame() },
-  { id: "zu", name: "Zu czy bez zu?", desc: "Przetrwanie: 3 życia", badge: "zu", color: "#facc15", run: () => zuGame() },
-  { id: "builder", name: "Układanka zdań", desc: "Przeciągnij słowa w kolejności", badge: "≡", color: "#22d3ee", run: () => builderGame() },
-  { id: "prefix", name: "zer- / ver-", desc: "Wrzuć słowo do kosza", badge: "zer", color: "#c084fc", run: () => prefixGame() },
-  { id: "cloze", name: "Rozmowa o pracę", desc: "Uzupełnij swoje odpowiedzi", badge: "Q", color: "#4ade80", run: () => clozeMenu() },
+  { id: "quiz", name: "Quiz słówek", desc: "4 odpowiedzi do wyboru", badge: "?", color: "#60a5fa", run: () => quizSetup() },
+  { id: "memory", name: "Memory", desc: "Znajdź pary DE–PL", badge: "▦", color: "#a78bfa", run: () => memorySetup() },
+  { id: "article", name: "der / die / das", desc: "Na czas – ile zdążysz", badge: "der", color: "#f87171", run: () => articleSetup() },
+  { id: "colloc", name: "Kolokacje", desc: "Angebot + unterbreiten…", badge: "+", color: "#34d399", run: () => collocSetup() },
+  { id: "conn", name: "Łączenie zdań", desc: "damit, um…zu, ohne, anstatt", badge: "⇄", color: "#fb923c", run: () => connSetup() },
+  { id: "gaps", name: "Luki", desc: "zu / um / damit / ohne / anstatt", badge: "__", color: "#f472b6", run: () => gapSetup() },
+  { id: "zu", name: "Zu czy bez zu?", desc: "3 życia", badge: "zu", color: "#facc15", run: () => zuSetup() },
+  { id: "builder", name: "Układanka zdań", desc: "Przeciągnij słowa w kolejności", badge: "≡", color: "#22d3ee", run: () => builderSetup() },
+  { id: "prefix", name: "zer- / ver-", desc: "Wrzuć słowo do kosza", badge: "zer", color: "#c084fc", run: () => prefixSetup() },
+  { id: "cloze", name: "Rozmowa o pracę", desc: "Uzupełnij odpowiedzi w dowolnej kolejności", badge: "Q", color: "#4ade80", run: () => clozeMenu() },
 ];
 
 function home() {
@@ -278,372 +796,78 @@ function home() {
   }, null);
 }
 
-/* ================= Generic quiz runner ================= */
-/*
-  cfg: { key, title, gen() -> question | questions: [], n, lives, seconds, cols, big, back, intro, onFinish(result) }
-  question: { prompt (html), options [], correct [] (pierwsza = najlepsza), explain (html), onResult(ok) }
-*/
-function runQuiz(cfg) {
-  const back = cfg.back || home;
-  show(cfg.title, (el) => {
-    let i = 0, score = 0, lives = cfg.lives || 0, combo = 0, xpGained = 0, answered = 0;
-    let timeLeft = cfg.seconds || 0, timerId = null, finished = false;
-    const total = cfg.questions ? cfg.questions.length : cfg.n || 0;
+/* ================= Modes (setup + run) ================= */
 
-    const hud = h("div", { class: "hud" });
-    const body = h("div");
-    el.append(hud, body);
+const COUNT_STD = (label, def, available) => ({ label, presets: [5, 10, 20, 0], def, available });
 
-    if (cfg.seconds) {
-      timerId = setInterval(() => {
-        timeLeft--;
-        renderHud();
-        if (timeLeft <= 0) finish();
-      }, 1000);
-      cleanup = () => clearInterval(timerId);
-    }
-
-    function renderHud() {
-      hud.innerHTML = "";
-      if (cfg.seconds) {
-        hud.append(h("div", { class: "bar" }, h("i", { style: `width:${(timeLeft / cfg.seconds) * 100}%` })), h("span", { class: "timer" }, `${timeLeft}s`));
-      } else if (total) {
-        hud.append(h("span", null, `${Math.min(i + 1, total)}/${total}`), h("div", { class: "bar" }, h("i", { style: `width:${(i / total) * 100}%` })));
-      }
-      if (cfg.lives) hud.append(h("span", { class: "hearts" }, "♥".repeat(Math.max(0, lives)) + "♡".repeat(Math.max(0, cfg.lives - lives))));
-      hud.append(h("span", null, `${score} pkt`));
-      if (combo >= 3) hud.append(h("span", { class: "combo" }, `x${combo}`));
-    }
-
-    function next() {
-      if (finished) return;
-      if (total && i >= total) return finish();
-      const q = cfg.questions ? cfg.questions[i] : cfg.gen();
-      renderHud();
-      body.innerHTML = "";
-      const opts = h("div", { class: `options ${cfg.cols ? "cols-" + cfg.cols : ""} ${cfg.big ? "big" : ""}` });
-      body.append(h("div", { class: "prompt pop", html: q.prompt }), opts);
-      let locked = false;
-      for (const o of q.options) {
-        const b = h("button", { class: "opt" }, o);
-        b.addEventListener("click", () => {
-          if (locked) return;
-          locked = true;
-          answer(q, o, opts);
-        });
-        opts.append(b);
-      }
-    }
-
-    function answer(q, chosen, optsEl) {
-      const ok = q.correct.includes(chosen);
-      answered++;
-      beep(ok);
-      if (q.onResult) q.onResult(ok);
-      for (const b of optsEl.children) {
-        if (q.correct.includes(b.textContent)) b.classList.add("ok");
-        else if (b.textContent === chosen) b.classList.add("bad");
-        else b.classList.add("dim");
-      }
-      if (ok) {
-        combo++;
-        score++;
-        const gain = 10 + (combo >= 3 ? 5 : 0);
-        xpGained += gain;
-        addXP(gain);
-      } else {
-        combo = 0;
-        if (cfg.lives) lives--;
-        optsEl.classList.add("shake");
-      }
-      i++;
-      renderHud();
-
-      const timed = !!cfg.seconds;
-      if (timed) {
-        setTimeout(() => { if (cfg.lives && lives <= 0) finish(); else next(); }, ok ? 350 : 900);
-        return;
-      }
-      const notBest = ok && q.correct.length > 1 && chosen !== q.correct[0];
-      const fb = h("div", { class: `feedback pop ${ok ? "" : "bad"}` },
-        h("div", { class: "title" }, ok ? (notBest ? `Dobrze! Częściej: ${q.correct[0]}` : "Dobrze!") : `Poprawnie: ${q.correct[0]}`),
-        q.explain ? h("div", { html: q.explain }) : null
-      );
-      const nextBtn = h("button", { class: "btn primary", style: "margin-top:14px" }, "Dalej");
-      nextBtn.addEventListener("click", () => { if (cfg.lives && lives <= 0) finish(); else next(); });
-      body.append(fb, nextBtn);
-      if (ok && !q.explain) setTimeout(() => nextBtn.isConnected && nextBtn.click(), 700);
-      else nextBtn.scrollIntoView({ behavior: "smooth", block: "end" });
-    }
-
-    function finish() {
-      if (finished) return;
-      finished = true;
-      if (timerId) clearInterval(timerId);
-      const record = cfg.key ? setBest(cfg.key, score) : false;
-      const result = { score, answered, total: total || answered, xp: xpGained };
-      body.innerHTML = "";
-      hud.innerHTML = "";
-      body.append(
-        h("div", { class: "card center pop" },
-          h("div", { class: "muted" }, cfg.seconds ? "Koniec czasu!" : cfg.lives && lives <= 0 ? "Koniec żyć!" : "Koniec rundy"),
-          h("div", { class: "result-big" }, total ? `${score}/${total}` : `${score}`),
-          h("div", null, `+${xpGained} XP`),
-          record ? h("div", { style: "color:var(--gold);font-weight:800;margin-top:6px" }, "Nowy rekord!") :
-            cfg.key && S.best[cfg.key] != null ? h("div", { class: "muted" }, `Rekord: ${S.best[cfg.key]}`) : null
-        )
-      );
-      if (cfg.onFinish) cfg.onFinish(result, body);
-      else body.append(
-        h("button", { class: "btn primary", onclick: () => runQuiz(cfg) }, "Jeszcze raz"),
-        h("button", { class: "btn ghost", onclick: back }, "Menu")
-      );
-    }
-
-    if (cfg.intro) {
-      body.append(cfg.intro, h("button", { class: "btn primary", onclick: next }, "Zaczynamy"));
-      renderHud();
-    } else next();
-  }, back);
+function quizSetup() {
+  setupScreen({
+    id: "quiz", title: "Quiz słówek", sets: true, dir: true,
+    count: COUNT_STD("Ile pytań", 10, () => activeWords().length),
+    buttons: [{ label: (n) => `Start (${n} pytań)`, run: (n) => {
+      const pool = activeWords();
+      runSession({ key: "quiz", title: "Quiz słówek", n, gen: vocabGen(pool), back: quizSetup });
+    } }],
+  });
 }
 
-/* ================= Question generators ================= */
-
-function genVocabQ(pool, dir = S.settings.dir) {
-  const due = dueWords(pool);
-  const w = due.length && Math.random() < 0.6 ? pick(due) : pick(pool);
-  const toPl = dir === "de-pl";
-  const others = shuffle(pool.filter((x) => x.key !== w.key && x.pl !== w.pl && x.de !== w.de));
-  const sameSet = others.filter((x) => x.set === w.set);
-  const distract = uniq([...sameSet, ...others].map((x) => (toPl ? x.pl : x.de))).slice(0, 3);
-  const correct = toPl ? w.pl : w.de;
-  return {
-    prompt: `<div class="big">${esc(toPl ? w.de : w.pl)}</div><div class="hint">${esc(SET_NAMES[w.set])}</div>`,
-    options: shuffle([correct, ...distract]),
-    correct: [correct],
-    explain: null,
-    onResult: (ok) => srsRecord(w.key, ok),
-  };
+function articleSetup() {
+  setupScreen({
+    id: "article", title: "der / die / das",
+    info: () => h("div", null, `Rzeczowników w bazie: ${nouns().length}. Odpowiadaj jak najszybciej – liczy się wynik w wybranym czasie.`),
+    count: { label: "Czas rundy (sekundy)", presets: [30, 60, 90, 120], def: 60, unit: " s", all: false, max: 600, min: 10, step: 15 },
+    buttons: [{ label: (n) => `Start (${n} s)`, run: (n) => {
+      const deck = makeDeck(nouns());
+      runSession({ key: "article" + (n === 60 ? "" : n), title: "der / die / das", seconds: n, gen: () => mcqArticle(deck()), back: articleSetup });
+    } }],
+  });
 }
 
-const NOUNS = WORDS.filter((w) => w.art);
-const nounDeck = makeDeck(NOUNS);
-function genArticleQ() {
-  const w = nounDeck();
-  return {
-    prompt: `<div class="big">${esc(w.noun)}</div><div class="hint">${esc(w.pl)}</div>`,
-    options: ["der", "die", "das"],
-    correct: [w.art],
-    explain: `<b>${esc(w.de)}</b> – ${esc(w.pl)}`,
-  };
+function indexSetup({ id, title, label, def, total, make, lives, back, extraInfo }) {
+  const setup = () => setupScreen({
+    id, title,
+    info: extraInfo,
+    count: COUNT_STD(label, def, () => total),
+    buttons: [{ label: (n) => `Start (${n})`, run: (n) => {
+      const deck = deckOf(total);
+      runSession({ key: id, title, n, lives, gen: () => make(deck()), back: setup });
+    } }],
+  });
+  return setup;
 }
-
-const collocDeck = makeDeck(COLLOCATIONS);
-function genCollocQ() {
-  const c = collocDeck();
-  const valid = COLLOCATIONS.filter((x) => x.stem === c.stem).map((x) => x.gap);
-  const distract = shuffle(uniq(COLLOCATIONS.map((x) => x.gap)).filter((g) => !valid.includes(g))).slice(0, 3);
-  return {
-    prompt: `<div class="sent">${esc(c.stem).replace("___", '<span class="gap">&nbsp;?&nbsp;</span>')}</div><div class="hint">${esc(c.pl)}</div>`,
-    options: shuffle([c.gap, ...distract]),
-    correct: [c.gap],
-    explain: `<b>${esc(c.stem.replace("___", c.gap))}</b> – ${esc(c.pl)}`,
-  };
-}
-
-const CONNECTOR_OPTS = ["dass", "zu", "um … zu", "damit", "anstatt … zu", "anstatt dass", "ohne … zu", "ohne dass"];
-const connDeck = makeDeck(CONNECTORS);
-function genConnectorQ() {
-  const c = connDeck();
-  const zuForm = c.answers.some((a) => a.includes("zu"));
-  const rule = zuForm
-    ? "Ten sam podmiot w obu zdaniach → najlepiej forma z <b>zu</b>."
-    : "Różne podmioty → <b>dass / damit / anstatt dass / ohne dass</b>.";
-  return {
-    prompt: `<div class="two-sent"><div>${esc(c.a)}</div><div>${esc(c.b)}</div></div><div class="hint">Jak połączysz te zdania?</div>`,
-    options: CONNECTOR_OPTS,
-    correct: c.answers,
-    explain: `<i>${esc(c.full)}</i><br><span class="muted">${rule}</span>`,
-  };
-}
-
-const GAP_OPTS = ["zu", "um", "damit", "anstatt", "ohne", "dass"];
-const gapDeck = makeDeck(GAPS);
-function genGapQ() {
-  const g = gapDeck();
-  const cap = /^[A-ZÄÖÜ]/.test(g.a);
-  const fix = (o) => (cap ? o[0].toUpperCase() + o.slice(1) : o);
-  const options = (g.opts || GAP_OPTS).map(fix);
-  return {
-    prompt: `<div class="sent">${esc(g.s).replace("___", '<span class="gap">&nbsp;?&nbsp;</span>')}</div>`,
-    options,
-    correct: [g.a],
-    explain: `<i>${esc(g.s.replace("___", g.a))}</i>`,
-  };
-}
-
-const zuDeck = makeDeck(ZU_ITEMS);
-function genZuQ() {
-  const z = zuDeck();
-  return {
-    prompt: `<div class="sent">${esc(z.s).replace("___", '<span class="gap">&nbsp;?&nbsp;</span>')}</div>`,
-    options: shuffle(z.opts),
-    correct: [z.opts[0]],
-    explain: `<i>${esc(z.s.replace("___", z.opts[0]))}</i><br><span class="muted">${esc(z.why)}</span>`,
-  };
-}
-
-const BINS = {
-  zer: { name: "zer- : zniszczenie", desc: "rozpadło się, zepsuło" },
-  verFehler: { name: "ver- : błąd, pomyłka", desc: "zrobione niewłaściwie" },
-  verWeg: { name: "ver- : oddalenie", desc: "opuszczenie, zniknięcie" },
-};
-const prefixDeck = makeDeck(PREFIX_ITEMS);
-function genPrefixQ() {
-  const p = prefixDeck();
-  const names = Object.values(BINS).map((b) => b.name);
-  return {
-    prompt: `<div class="big">${esc(p.w)}</div><div class="hint">Co oznacza przedrostek?</div>`,
-    options: names,
-    correct: [BINS[p.bin].name],
-    explain: `<b>${esc(p.w)}</b> – ${esc(p.pl)}`,
-  };
-}
-
-/* ================= Modes ================= */
-
-function quizVocab() {
-  const pool = activeWords();
-  runQuiz({ key: "quiz", title: "Quiz słówek", n: 10, gen: () => genVocabQ(pool) });
-}
-function articleGame() {
-  runQuiz({ key: "article", title: "der / die / das", seconds: 60, gen: genArticleQ, cols: 3, big: true });
-}
-function collocGame() {
-  runQuiz({ key: "colloc", title: "Kolokacje", n: 10, gen: genCollocQ, cols: 2 });
-}
-function connectorGame() {
-  runQuiz({ key: "conn", title: "Łączenie zdań", n: 10, gen: genConnectorQ, cols: 2 });
-}
-function gapGame() {
-  runQuiz({ key: "gaps", title: "Luki", n: 12, gen: genGapQ, cols: 3 });
-}
-function zuGame() {
-  runQuiz({ key: "zu", title: "Zu czy bez zu?", lives: 3, gen: genZuQ });
-}
+const collocSetup = indexSetup({ id: "colloc", title: "Kolokacje", label: "Ile pytań", def: 10, total: COLLOCATIONS.length, make: mcqColloc });
+const connSetup = indexSetup({ id: "conn", title: "Łączenie zdań", label: "Ile par zdań", def: 10, total: CONNECTORS.length, make: mcqConnector });
+const gapSetup = indexSetup({ id: "gaps", title: "Luki", label: "Ile zdań", def: 12, total: GAPS.length, make: mcqGap });
+const zuSetup = indexSetup({
+  id: "zu", title: "Zu czy bez zu?", label: "Ile zdań (masz 3 życia)", def: 0, total: ZU_ITEMS.length, make: mcqZu, lives: 3,
+  extraInfo: () => h("div", null, "Masz 3 życia. Każdy błąd zabiera jedno."),
+});
 
 /* ---------- Flashcards ---------- */
 
-const FLASH_PRESETS = [10, 20, 30, 50, 0];
-
-function flashCount(available) {
-  const n = S.settings.flashCount;
-  return n > 0 ? Math.min(n, available) : available;
-}
-
 function flashSetup() {
-  show("Fiszki", (el) => {
-    const info = h("div");
-    const presets = h("div");
-    const input = h("input", { class: "num-input", type: "number", inputmode: "numeric", min: "1", "aria-label": "Liczba fiszek" });
-    const startBtn = h("button", { class: "btn primary", style: "margin-top:16px", onclick: () => flashSession(false) });
-    const randomBtn = h("button", { class: "btn ghost", onclick: () => flashSession(true) });
-
-    function refresh() {
+  const learnable = () => {
+    const pool = activeWords();
+    const n = dueWords(pool).length + pool.filter((w) => !S.srs[w.key]).length;
+    return n || pool.length;
+  };
+  setupScreen({
+    id: "flash", title: "Fiszki", sets: true, dir: true,
+    info: () => {
       const pool = activeWords();
-      const due = dueWords(pool).length;
-      const fresh = pool.filter((w) => !S.srs[w.key]).length;
-      const learnable = due + fresh || pool.length;
-      info.innerHTML = "";
-      info.append(
-        h("div", null, h("b", null, `Do powtórki: ${due}`), ` · nowe: ${fresh} · w działach: ${pool.length}`),
-        h("div", { class: "muted", style: "margin-top:6px;font-size:15px" }, "Najpierw lecą powtórki, potem nowe słówka. Znane wracają coraz rzadziej, nieznane – szybko.")
-      );
-      for (const b of presets.children) b.classList.toggle("on", Number(b.dataset.n) === (S.settings.flashCount || 0));
-      if (document.activeElement !== input) input.value = S.settings.flashCount > 0 ? S.settings.flashCount : "";
-      input.placeholder = `wszystkie (${pool.length})`;
-      startBtn.textContent = `Ucz się (${flashCount(learnable)} kart)`;
-      startBtn.disabled = !pool.length;
-      randomBtn.textContent = `Losowe ${flashCount(pool.length)} ze wszystkich wybranych`;
-      randomBtn.disabled = !pool.length;
-    }
-
-    const setCount = (n) => { S.settings.flashCount = n; save(); refresh(); };
-    for (const n of FLASH_PRESETS) {
-      presets.append(h("button", { class: "pill", "data-n": n, onclick: () => setCount(n) }, n ? String(n) : "Wszystkie"));
-    }
-    const step = (d) => {
-      const max = activeWords().length || 1;
-      const cur = S.settings.flashCount > 0 ? S.settings.flashCount : max;
-      setCount(Math.max(1, Math.min(max, cur + d)));
-    };
-    input.addEventListener("input", () => {
-      const v = parseInt(input.value, 10);
-      if (v > 0) setCount(v);
-    });
-    input.addEventListener("blur", refresh);
-
-    el.append(
-      h("div", { class: "card" }, info),
-      h("div", { class: "section-title" }, "Ile fiszek w sesji"),
-      presets,
-      h("div", { class: "stepper" },
-        h("button", { class: "icon-btn", "aria-label": "Mniej", onclick: () => step(-5) }, "−"),
-        input,
-        h("button", { class: "icon-btn", "aria-label": "Więcej", onclick: () => step(5) }, "+")
-      ),
-      h("div", { class: "section-title" }, "Kierunek"),
-      dirPills(refresh),
-      h("div", { class: "section-title" }, "Działy (wspólne dla wszystkich trybów)"),
-      setPills(refresh),
-      startBtn,
-      randomBtn
-    );
-    refresh();
+      return h("div", null,
+        h("div", null, h("b", null, `Do powtórki: ${dueWords(pool).length}`), ` · nowe: ${pool.filter((w) => !S.srs[w.key]).length} · w działach: ${pool.length}`),
+        h("div", { class: "muted", style: "margin-top:6px;font-size:15px" }, "Najpierw lecą powtórki, potem nowe słówka. Znane wracają coraz rzadziej, nieznane – szybko."));
+    },
+    count: { label: "Ile fiszek w sesji", presets: [10, 20, 30, 50, 0], def: 20, available: () => activeWords().length },
+    buttons: [
+      { label: (n) => `Ucz się (${n} kart)`, available: learnable, run: (n) => flashSession(false, n) },
+      { label: (n) => `Losowe ${n} ze wszystkich wybranych`, cls: "ghost", run: (n) => flashSession(true, n) },
+    ],
   });
 }
 
-function dirPills(onChange) {
-  const wrap = h("div");
-  for (const [v, label] of [["de-pl", "Niemiecki → polski"], ["pl-de", "Polski → niemiecki"]]) {
-    const b = h("button", { class: `pill ${S.settings.dir === v ? "on" : ""}` }, label);
-    b.addEventListener("click", () => {
-      S.settings.dir = v;
-      save();
-      for (const x of wrap.children) x.classList.toggle("on", x === b);
-      onChange && onChange();
-    });
-    wrap.append(b);
-  }
-  return wrap;
-}
-
-function setPills(onChange) {
-  const btns = {};
-  const sync = () => { for (const id in btns) btns[id].classList.toggle("on", S.settings.sets.includes(id)); };
-  const all = h("button", { class: "pill" }, "Wszystkie / żadne");
-  all.addEventListener("click", () => {
-    S.settings.sets = S.settings.sets.length === VOCAB.length ? [] : VOCAB.map((s) => s.id);
-    save();
-    sync();
-    onChange && onChange();
-  });
-  for (const s of VOCAB) {
-    const b = h("button", { class: "pill" }, `${s.name} (${s.words.length})`);
-    b.addEventListener("click", () => {
-      const on = S.settings.sets.includes(s.id);
-      S.settings.sets = on ? S.settings.sets.filter((x) => x !== s.id) : [...S.settings.sets, s.id];
-      save();
-      sync();
-      onChange && onChange();
-    });
-    btns[s.id] = b;
-  }
-  sync();
-  return h("div", null, all, Object.values(btns));
-}
-
-function flashSession(random) {
+function flashSession(random, n) {
   const pool = activeWords();
   let queue;
   if (random) queue = shuffle(pool);
@@ -653,7 +877,7 @@ function flashSession(random) {
     queue = [...due, ...fresh];
     if (!queue.length) queue = shuffle(pool);
   }
-  queue = queue.slice(0, flashCount(queue.length));
+  queue = queue.slice(0, n);
   const toPl = S.settings.dir === "de-pl";
   let known = 0, seen = 0;
 
@@ -689,7 +913,7 @@ function flashSession(random) {
         if (flipped) return;
         flipped = true;
         card.querySelector(".tap").remove();
-        card.append(h("div", { class: "back pop" }, toPl ? w.pl : w.de));
+        card.append(h("div", { class: "back pop" }, w.emoji ? h("span", { class: "emo" }, w.emoji, " ") : null, toPl ? w.pl : w.de));
         actions.style.visibility = "visible";
         if (toPl) speak(w.de);
       }
@@ -727,8 +951,8 @@ function flashSession(random) {
           h("div", { class: "muted" }, "Sesja zakończona"),
           h("div", { class: "result-big" }, `${known}`),
           h("div", null, "słówek zaliczonych")),
-        h("button", { class: "btn primary", onclick: () => flashSession(random) }, "Kolejna sesja"),
-        h("button", { class: "btn ghost", onclick: home }, "Menu")
+        h("button", { class: "btn primary", onclick: () => flashSession(random, n) }, "Kolejna sesja"),
+        h("button", { class: "btn ghost", onclick: flashSetup }, "Ustawienia fiszek")
       );
     }
     render();
@@ -737,17 +961,30 @@ function flashSession(random) {
 
 /* ---------- Memory ---------- */
 
-function memoryGame() {
-  const pool = activeWords().filter((w) => w.de.length <= 34 && w.pl.length <= 40);
-  const pairs = shuffle(pool).slice(0, 6);
+const MEMORY_MAX = 10;
+const memoryPool = () => activeWords().filter((w) => w.de.length <= 34 && w.pl.length <= 40);
+
+function memorySetup() {
+  setupScreen({
+    id: "memory", title: "Memory", sets: true,
+    info: () => h("div", null, "Odkrywaj po dwie karty i szukaj par niemieckie słowo – polskie znaczenie. Na telefonie najwygodniej do 10 par."),
+    count: { label: "Ile par", presets: [4, 6, 8, 10], def: 6, all: false, max: MEMORY_MAX, min: 2, step: 1 },
+    buttons: [{ label: (n) => `Start (${Math.min(n, memoryPool().length)} par)`, run: (n) => memoryGame(Math.min(n, memoryPool().length)) }],
+  });
+}
+
+function memoryGame(nPairs) {
+  const pairs = shuffle(memoryPool()).slice(0, nPairs);
   const cards = shuffle(pairs.flatMap((w) => [{ w, side: "de" }, { w, side: "pl" }]));
-  let open = [], moves = 0, matched = 0, start = Date.now(), busy = false;
+  let open = [], moves = 0, matched = 0, busy = false;
+  const start = Date.now();
+  const bestKey = `memory${nPairs}`;
 
   show("Memory", (el) => {
     const hud = h("div", { class: "hud" });
-    const grid = h("div", { class: "memory" });
+    const grid = h("div", { class: `memory ${nPairs > 6 ? "dense" : ""}` });
     el.append(hud, grid);
-    const renderHud = () => { hud.innerHTML = ""; hud.append(h("span", null, `Ruchy: ${moves}`), h("span", { class: "spacer" }), h("span", null, `Pary: ${matched}/6`)); };
+    const renderHud = () => { hud.innerHTML = ""; hud.append(h("span", null, `Ruchy: ${moves}`), h("span", { class: "spacer" }), h("span", null, `Pary: ${matched}/${nPairs}`)); };
     renderHud();
 
     for (const c of cards) {
@@ -767,7 +1004,7 @@ function memoryGame() {
           a.el.classList.add("done");
           d.el.classList.add("done");
           matched++;
-          if (matched === 6) setTimeout(finish, 500);
+          if (matched === nPairs) setTimeout(finish, 500);
         } else {
           beep(false);
           busy = true;
@@ -785,27 +1022,27 @@ function memoryGame() {
 
     function finish() {
       const secs = Math.round((Date.now() - start) / 1000);
-      const xp = Math.max(15, 70 - (moves - 6) * 4);
+      const xp = Math.max(10, nPairs * 12 - (moves - nPairs) * 4);
       addXP(xp);
-      const rec = setBest("memory", -moves);
+      const rec = setBest(bestKey, -moves);
       el.innerHTML = "";
       el.append(
         h("div", { class: "card center pop" },
           h("div", { class: "muted" }, `Wszystkie pary w ${secs} s`),
           h("div", { class: "result-big" }, `${moves} ruchów`),
           h("div", null, `+${xp} XP`),
-          rec ? h("div", { style: "color:var(--gold);font-weight:800" }, "Nowy rekord!") : h("div", { class: "muted" }, `Rekord: ${-S.best.memory} ruchów`)),
-        h("div", { class: "card" }, pairs.map((w) => h("div", { style: "padding:4px 0" }, h("b", null, w.de), " – ", w.pl))),
-        h("button", { class: "btn primary", onclick: memoryGame }, "Nowa plansza"),
-        h("button", { class: "btn ghost", onclick: home }, "Menu")
+          rec ? h("div", { style: "color:var(--gold);font-weight:800" }, "Nowy rekord!") : h("div", { class: "muted" }, `Rekord (${nPairs} par): ${-S.best[bestKey]} ruchów`)),
+        h("div", { class: "card" }, pairs.map((w) => h("div", { style: "padding:4px 0" }, w.emoji ? h("span", { class: "emo" }, w.emoji, " ") : null, h("b", null, w.de), " – ", w.pl))),
+        h("button", { class: "btn primary", onclick: () => memoryGame(nPairs) }, "Nowa plansza"),
+        h("button", { class: "btn ghost", onclick: memorySetup }, "Ustawienia")
       );
     }
-  });
+  }, memorySetup);
 }
 
 /* ---------- Pointer drag (działa na iPhonie) ---------- */
 /*
-  enableDrag(el, { onTap, onMove(x, y), onDrop(x, y) })
+  enableDrag(el, { onTap, onStart, onMove(x, y), onDrop(x, y) })
   Ruch > 8 px = przeciąganie, inaczej = dotknięcie.
 */
 function enableDrag(el, { onTap, onStart, onMove, onDrop }) {
@@ -815,7 +1052,7 @@ function enableDrag(el, { onTap, onStart, onMove, onDrop }) {
     pid = e.pointerId;
     sx = e.clientX; sy = e.clientY;
     dragging = false;
-    el.setPointerCapture(pid);
+    try { el.setPointerCapture(pid); } catch (err) { /* stary Safari */ }
   });
   el.addEventListener("pointermove", (e) => {
     if (pid !== e.pointerId) return;
@@ -858,191 +1095,209 @@ const inRect = (el, x, y) => {
 
 /* ---------- Sentence builder ---------- */
 
-function builderGame() {
-  const list = shuffle(SENTENCES).slice(0, 8);
-  let idx = 0, firstTry = 0, xp = 0;
+RENDERERS.builder = (el, step, ctx) => {
+  const target = SENTENCES[step.i];
+  const words = target.split(" ");
+  let tries = 0;
+  let answer = [];
+  let pool = shuffle(words.map((w, i) => ({ w, id: i })));
+  if (pool.length > 1 && pool.every((t, i) => t.id === i)) pool.reverse();
 
-  show("Układanka zdań", (el) => {
-    function round() {
-      el.innerHTML = "";
-      if (idx >= list.length) return finish();
-      const target = list[idx];
-      const words = target.split(" ");
-      let tries = 0;
-      let answer = [];
-      let pool = shuffle(words.map((w, i) => ({ w, id: i })));
-      if (pool.every((t, i) => t.id === i)) pool.reverse();
+  const ansZone = h("div", { class: "zone answer" });
+  const poolZone = h("div", { class: "zone pool" });
+  const fb = h("div");
+  const checkBtn = h("button", { class: "btn primary" }, "Sprawdź");
+  const showBtn = h("button", { class: "btn ghost" }, "Pokaż odpowiedź");
+  el.append(h("div", { class: "muted", style: "margin:0 4px 8px;font-size:15px" }, "Dotknij słowa, aby je dodać lub usunąć. Przeciągnij, aby zmienić kolejność."), ansZone, poolZone, checkBtn, showBtn, fb);
 
-      const hud = h("div", { class: "hud" }, h("span", null, `${idx + 1}/${list.length}`), h("div", { class: "bar" }, h("i", { style: `width:${(idx / list.length) * 100}%` })), h("span", null, `${firstTry} ✓`));
-      const ansZone = h("div", { class: "zone answer" });
-      const poolZone = h("div", { class: "zone pool" });
-      const fb = h("div");
-      const checkBtn = h("button", { class: "btn primary" }, "Sprawdź");
-      const showBtn = h("button", { class: "btn ghost" }, "Pokaż odpowiedź");
-      el.append(hud, h("div", { class: "muted", style: "margin:0 4px 8px;font-size:15px" }, "Dotknij słowa, aby je dodać lub usunąć. Przeciągnij, aby zmienić kolejność."), ansZone, poolZone, checkBtn, showBtn, fb);
-
-      function insertIndex(x, y, exclude) {
-        const tiles = [...ansZone.children].filter((t) => t !== exclude);
-        for (let k = 0; k < tiles.length; k++) {
-          const r = tiles[k].getBoundingClientRect();
-          if (y < r.top) return k;
-          if (y <= r.bottom && x < r.left + r.width / 2) return k;
-        }
-        return tiles.length;
-      }
-
-      function tileEl(t, inAnswer) {
-        const b = h("div", { class: "tile" }, t.w);
-        enableDrag(b, {
-          onTap: () => {
-            if (inAnswer) { answer = answer.filter((x) => x !== t); pool.push(t); }
-            else { pool = pool.filter((x) => x !== t); answer.push(t); }
-            draw();
-          },
-          onMove: (x, y) => ansZone.classList.toggle("hot", inRect(ansZone, x, y)),
-          onDrop: (x, y) => {
-            ansZone.classList.remove("hot");
-            if (x == null) return draw();
-            if (inRect(ansZone, x, y) || (inAnswer && !inRect(poolZone, x, y))) {
-              const k = insertIndex(x, y, b);
-              answer = answer.filter((z) => z !== t);
-              pool = pool.filter((z) => z !== t);
-              answer.splice(k, 0, t);
-            } else if (inAnswer) {
-              answer = answer.filter((z) => z !== t);
-              pool.push(t);
-            }
-            draw();
-          },
-        });
-        return b;
-      }
-
-      function draw() {
-        ansZone.innerHTML = "";
-        poolZone.innerHTML = "";
-        answer.forEach((t) => ansZone.append(tileEl(t, true)));
-        pool.forEach((t) => poolZone.append(tileEl(t, false)));
-        if (!answer.length) ansZone.append(h("span", { class: "muted", style: "padding:10px" }, "Tutaj ułóż zdanie"));
-      }
-      draw();
-
-      checkBtn.addEventListener("click", () => {
-        if (pool.length) { toast("Użyj wszystkich słów"); return; }
-        const got = answer.map((t) => t.w).join(" ");
-        tries++;
-        if (got === target) {
-          beep(true);
-          [...ansZone.children].forEach((c) => c.classList.add("right"));
-          if (tries === 1) { firstTry++; xp += 20; addXP(20); } else { xp += 5; addXP(5); }
-          fb.innerHTML = "";
-          fb.append(h("div", { class: "feedback pop" }, h("div", { class: "title" }, "Super!"), h("i", null, target)),
-            h("button", { class: "btn primary", style: "margin-top:12px", onclick: () => { idx++; round(); } }, "Dalej"));
-          checkBtn.remove(); showBtn.remove();
-          speak(target);
-        } else {
-          beep(false);
-          ansZone.classList.add("shake");
-          setTimeout(() => ansZone.classList.remove("shake"), 500);
-          [...ansZone.children].forEach((c, k) => c.classList.toggle("wrong", answer[k].w !== words[k]));
-          fb.innerHTML = "";
-          fb.append(h("div", { class: "feedback bad pop" }, "Na czerwono słowa na złym miejscu. Popraw i sprawdź ponownie."));
-        }
-      });
-      showBtn.addEventListener("click", () => {
-        fb.innerHTML = "";
-        fb.append(h("div", { class: "feedback bad pop" }, h("div", { class: "title" }, "Odpowiedź:"), h("i", null, target)),
-          h("button", { class: "btn primary", style: "margin-top:12px", onclick: () => { idx++; round(); } }, "Dalej"));
-        checkBtn.remove(); showBtn.remove();
-      });
+  function insertIndex(x, y, exclude) {
+    const tiles = [...ansZone.children].filter((t) => t !== exclude && t.classList.contains("tile"));
+    for (let k = 0; k < tiles.length; k++) {
+      const r = tiles[k].getBoundingClientRect();
+      if (y < r.top) return k;
+      if (y <= r.bottom && x < r.left + r.width / 2) return k;
     }
+    return tiles.length;
+  }
 
-    function finish() {
-      setBest("builder", firstTry);
-      el.append(
-        h("div", { class: "card center pop" },
-          h("div", { class: "muted" }, "Za pierwszym razem"),
-          h("div", { class: "result-big" }, `${firstTry}/${list.length}`),
-          h("div", null, `+${xp} XP`)),
-        h("button", { class: "btn primary", onclick: builderGame }, "Jeszcze raz"),
-        h("button", { class: "btn ghost", onclick: home }, "Menu")
-      );
+  function tileEl(t, inAnswer) {
+    const b = h("div", { class: "tile" }, t.w);
+    enableDrag(b, {
+      onTap: () => {
+        if (inAnswer) { answer = answer.filter((x) => x !== t); pool.push(t); }
+        else { pool = pool.filter((x) => x !== t); answer.push(t); }
+        draw();
+      },
+      onMove: (x, y) => ansZone.classList.toggle("hot", inRect(ansZone, x, y)),
+      onDrop: (x, y) => {
+        ansZone.classList.remove("hot");
+        if (x == null) return draw();
+        if (inRect(ansZone, x, y) || (inAnswer && !inRect(poolZone, x, y))) {
+          const k = insertIndex(x, y, b);
+          answer = answer.filter((z) => z !== t);
+          pool = pool.filter((z) => z !== t);
+          answer.splice(k, 0, t);
+        } else if (inAnswer) {
+          answer = answer.filter((z) => z !== t);
+          pool.push(t);
+        }
+        draw();
+      },
+    });
+    return b;
+  }
+
+  function draw() {
+    ansZone.innerHTML = "";
+    poolZone.innerHTML = "";
+    answer.forEach((t) => ansZone.append(tileEl(t, true)));
+    pool.forEach((t) => poolZone.append(tileEl(t, false)));
+    if (!answer.length) ansZone.append(h("span", { class: "muted", style: "padding:10px" }, "Tutaj ułóż zdanie"));
+  }
+  draw();
+
+  const finishStep = (ok, given) => {
+    checkBtn.remove();
+    showBtn.remove();
+    fb.innerHTML = "";
+    ctx.done({ ok, given, expected: target, explain: ok ? `<i>${esc(target)}</i>` : null, after: null });
+    if (ok) speak(target);
+  };
+
+  checkBtn.addEventListener("click", () => {
+    if (pool.length) { toast("Użyj wszystkich słów"); return; }
+    const got = answer.map((t) => t.w).join(" ");
+    tries++;
+    if (got === target) {
+      [...ansZone.children].forEach((c) => c.classList.add("right"));
+      finishStep(tries === 1, null);
+    } else {
+      beep(false);
+      ansZone.classList.add("shake");
+      setTimeout(() => ansZone.classList.remove("shake"), 500);
+      [...ansZone.children].forEach((c, k) => c.classList.toggle("wrong", answer[k].w !== words[k]));
+      fb.innerHTML = "";
+      fb.append(h("div", { class: "feedback bad pop" }, "Na czerwono słowa na złym miejscu. Popraw i sprawdź ponownie (zaliczone będzie bez punktu za pierwszą próbę)."));
     }
-    round();
+  });
+  showBtn.addEventListener("click", () => finishStep(false, answer.map((t) => t.w).join(" ")));
+};
+
+function builderSetup() {
+  setupScreen({
+    id: "builder", title: "Układanka zdań",
+    count: COUNT_STD("Ile zdań", 8, () => SENTENCES.length),
+    buttons: [{ label: (n) => `Start (${n} zdań)`, run: (n) => {
+      const deck = deckOf(SENTENCES.length);
+      runSession({ key: "builder", title: "Układanka zdań", n, gen: () => ({ kind: "builder", i: deck(), xp: 20 }), back: builderSetup });
+    } }],
   });
 }
 
 /* ---------- Prefix sort ---------- */
 
-function prefixGame() {
-  const items = shuffle(PREFIX_ITEMS).slice(0, 10);
-  let idx = 0, score = 0, xp = 0;
+RENDERERS.prefix = (el, step, ctx) => {
+  const it = PREFIX_ITEMS[step.i];
+  let locked = false;
+  const plLine = h("div", { class: "drop-pl", hidden: !S.settings.prefixPl }, it.pl);
+  const cardEl = h("div", { class: "drop-card pop" }, it.w);
+  const bins = h("div", { class: "bins" });
+  const binEls = {};
+  for (const [id, b] of Object.entries(BINS)) {
+    const be = h("button", { class: "bin" }, h("b", null, b.name), h("small", null, b.desc));
+    be.addEventListener("click", () => choose(id));
+    binEls[id] = be;
+    bins.append(be);
+  }
+  const toggle = togglePill("Pokaż tłumaczenie", () => S.settings.prefixPl, (v) => (S.settings.prefixPl = v), () => { plLine.hidden = !S.settings.prefixPl; });
+  el.append(
+    h("div", { class: "row wrap", style: "justify-content:space-between" },
+      h("span", { class: "muted", style: "font-size:15px" }, "Przeciągnij kartę do kosza albo dotknij kosza. Dotknij karty = tłumaczenie."),
+      toggle),
+    h("div", { class: "drop-card-wrap" }, h("div", { class: "center" }, cardEl, plLine)),
+    bins
+  );
 
-  show("zer- / ver-", (el) => {
-    function round() {
-      el.innerHTML = "";
-      if (idx >= items.length) return finish();
-      const it = items[idx];
-      let locked = false;
-      const hud = h("div", { class: "hud" }, h("span", null, `${idx + 1}/${items.length}`), h("div", { class: "bar" }, h("i", { style: `width:${(idx / items.length) * 100}%` })), h("span", null, `${score} pkt`));
-      const cardEl = h("div", { class: "drop-card pop" }, it.w);
-      const bins = h("div", { class: "bins" });
-      const fb = h("div");
-      const binEls = {};
-      for (const [id, b] of Object.entries(BINS)) {
-        const be = h("button", { class: "bin" }, h("b", null, b.name), h("small", null, b.desc));
-        be.addEventListener("click", () => choose(id));
-        binEls[id] = be;
-        bins.append(be);
-      }
-      el.append(hud, h("div", { class: "muted center", style: "font-size:15px" }, "Przeciągnij kartę do kosza albo dotknij kosza"), h("div", { class: "drop-card-wrap" }, cardEl), bins, fb);
+  const reveal = () => { plLine.hidden = false; };
+  let pressTimer = null;
+  cardEl.addEventListener("pointerdown", () => { pressTimer = setTimeout(reveal, 450); });
+  const clearPress = () => clearTimeout(pressTimer);
+  cardEl.addEventListener("pointermove", clearPress);
+  cardEl.addEventListener("pointerup", clearPress);
+  cardEl.addEventListener("pointercancel", clearPress);
+  cardEl.addEventListener("contextmenu", (e) => e.preventDefault());
 
-      const binAt = (x, y) => Object.keys(binEls).find((id) => inRect(binEls[id], x, y));
-      enableDrag(cardEl, {
-        onMove: (x, y) => { const id = binAt(x, y); for (const k in binEls) binEls[k].classList.toggle("hot", k === id); },
-        onDrop: (x, y) => { for (const k in binEls) binEls[k].classList.remove("hot"); if (x != null) { const id = binAt(x, y); if (id) choose(id); } },
+  const binAt = (x, y) => Object.keys(binEls).find((id) => inRect(binEls[id], x, y));
+  enableDrag(cardEl, {
+    onTap: reveal,
+    onMove: (x, y) => { clearPress(); const id = binAt(x, y); for (const k in binEls) binEls[k].classList.toggle("hot", k === id); },
+    onDrop: (x, y) => { for (const k in binEls) binEls[k].classList.remove("hot"); if (x != null) { const id = binAt(x, y); if (id) choose(id); } },
+  });
+
+  function choose(id) {
+    if (locked) return;
+    locked = true;
+    const ok = id === it.bin;
+    binEls[it.bin].classList.add("ok");
+    if (!ok) binEls[id].classList.add("bad");
+    cardEl.style.visibility = "hidden";
+    plLine.hidden = true;
+    ctx.done({
+      ok,
+      given: ok ? null : BINS[id].name,
+      expected: BINS[it.bin].name,
+      explain: `<b>${esc(it.w)}</b> – ${esc(it.pl)}: ${esc(BINS[it.bin].reason)}`,
+      rule: it.bin === "zer" ? "zer" : "ver",
+    });
+  }
+};
+
+function prefixSetup() {
+  setupScreen({
+    id: "prefix", title: "zer- / ver-",
+    count: COUNT_STD("Ile słów", 10, () => PREFIX_ITEMS.length),
+    options: () => [
+      h("div", { class: "section-title" }, "Tłumaczenie"),
+      togglePill("Pokaż tłumaczenie pod słowem", () => S.settings.prefixPl, (v) => (S.settings.prefixPl = v)),
+    ],
+    buttons: [{ label: (n) => `Start (${n} słów)`, run: (n) => {
+      const deck = deckOf(PREFIX_ITEMS.length);
+      runSession({
+        key: "prefix", title: "zer- / ver-", n, gen: () => ({ kind: "prefix", i: deck() }), back: prefixSetup,
+        onFinish: (r, body) => body.append(
+          h("div", { class: "muted center", style: "margin:8px 0 14px" }, "Pamiętaj: zer- i ver- nie łączą się z ge- w Partizip II (zerrissen, verlassen)."),
+          h("button", { class: "btn primary", onclick: () => prefixSetup() }, "Jeszcze raz"),
+          h("button", { class: "btn ghost", onclick: home }, "Menu")),
       });
-
-      function choose(id) {
-        if (locked) return;
-        locked = true;
-        const ok = id === it.bin;
-        beep(ok);
-        binEls[it.bin].classList.add("ok");
-        if (!ok) binEls[id].classList.add("bad");
-        if (ok) { score++; xp += 10; addXP(10); }
-        cardEl.style.visibility = "hidden";
-        fb.append(
-          h("div", { class: `feedback pop ${ok ? "" : "bad"}` }, h("div", { class: "title" }, ok ? "Dobrze!" : "Nie tym razem"), h("b", null, it.w), ` – ${it.pl}`),
-          h("button", { class: "btn primary", style: "margin-top:12px", onclick: () => { idx++; round(); } }, "Dalej")
-        );
-      }
-    }
-    function finish() {
-      setBest("prefix", score);
-      el.append(
-        h("div", { class: "card center pop" }, h("div", { class: "result-big" }, `${score}/${items.length}`), h("div", null, `+${xp} XP`),
-          h("div", { class: "muted", style: "margin-top:8px" }, "Pamiętaj: zer- i ver- nie łączą się z ge- w Partizip II (zerrissen, verlassen).")),
-        h("button", { class: "btn primary", onclick: prefixGame }, "Jeszcze raz"),
-        h("button", { class: "btn ghost", onclick: home }, "Menu")
-      );
-    }
-    round();
+    } }],
   });
 }
 
-/* ---------- Cloze (rozmowa o pracę / teksty) ---------- */
+/* ---------- Cloze: rozmowa o pracę / teksty 3B (dowolna kolejność) ---------- */
 
 function clozeMenu() {
-  show("Rozmowa o pracę", (el) => {
-    el.append(h("div", { class: "muted", style: "margin:0 4px 12px" }, "Wybierz pytanie. Uzupełniasz luki w odpowiedzi po kolei, potem możesz odsłuchać całość."));
-    TEXTS.forEach((t, i) => {
-      const best = S.best["cloze" + i];
-      el.append(h("button", { class: "day", onclick: () => clozeGame(i) },
-        h("span", { class: "num" }, i + 1),
-        h("span", null, h("b", null, t.q), h("br"), h("small", { class: "muted" }, t.pl + (best != null ? ` · najlepiej: ${best} błędów` : "")))
-      ));
-    });
+  setupScreen({
+    id: "cloze", title: "Rozmowa o pracę",
+    info: () => h("div", null, "Uzupełniasz luki w dowolnej kolejności: przeciągnij słowo na lukę albo dotknij słowa i luki. Na końcu „Sprawdź”."),
+    count: COUNT_STD("Ile tekstów w serii (losowo)", 0, () => TEXTS.length),
+    buttons: [{ label: (n) => `Losowa seria (${n})`, run: (n) => clozeSeries(shuffle(range(TEXTS.length)).slice(0, n)) }],
+    footer: () => h("div", null,
+      h("div", { class: "section-title" }, "Albo wybierz jedno pytanie"),
+      TEXTS.map((t, i) => {
+        const best = S.best["cloze" + i];
+        return h("button", { class: "day", onclick: () => clozeGame(i) },
+          h("span", { class: "num" }, i + 1),
+          h("span", null, h("b", null, t.q), h("br"), h("small", { class: "muted" }, t.pl + (best != null ? ` · najlepiej: ${best} błędów` : ""))));
+      })),
+  });
+}
+
+function clozeSeries(list, k = 0) {
+  if (k >= list.length) return clozeMenu();
+  clozeGame(list[k], {
+    title: `Rozmowa ${k + 1}/${list.length}`,
+    nextLabel: k + 1 < list.length ? "Następny tekst" : "Koniec serii",
+    onFinish: () => clozeSeries(list, k + 1),
   });
 }
 
@@ -1051,71 +1306,161 @@ function clozeGame(i, opts = {}) {
   const parts = t.a.split(/(\{[^}]+\})/).filter(Boolean);
   const gaps = parts.filter((p) => p.startsWith("{")).map((p) => p.slice(1, -1));
   const otherWords = TEXTS.filter((_, k) => k !== i).flatMap((x) => (x.a.match(/\{([^}]+)\}/g) || []).map((m) => m.slice(1, -1)));
-  const bankWords = shuffle([...gaps.map((w, k) => ({ w, k })), ...shuffle(uniq(otherWords).filter((w) => !gaps.includes(w))).slice(0, 3).map((w) => ({ w, k: -1 }))]);
-  let cur = 0, mistakes = 0;
+  const extra = shuffle(uniq(otherWords).filter((w) => !gaps.includes(w))).slice(0, 3);
+  const bank = shuffle([...gaps, ...extra].map((w, id) => ({ w, id })));
+  const filled = gaps.map(() => null);
+  const locked = gaps.map(() => false);
+  let selWord = null, selGap = null, mistakes = 0, checks = 0;
 
   show(opts.title || "Rozmowa o pracę", (el) => {
+    el.classList.add("no-pad-top");
+    const bankEl = h("div", { class: "bank" });
+    const status = h("div", { class: "bank-status muted" });
+    const sticky = h("div", { class: "bank-sticky" }, bankEl, status);
     const gapEls = [];
     const text = h("div", { class: "cloze" });
     for (const p of parts) {
       if (p.startsWith("{")) {
-        const g = h("span", { class: "g" }, p.slice(1, -1));
+        const k = gapEls.length;
+        const g = h("button", { class: "g", "data-k": k });
+        g.addEventListener("click", () => tapGap(k));
         gapEls.push(g);
         text.append(g);
       } else text.append(p);
     }
-    const bank = h("div", { class: "bank" });
+    const checkBtn = h("button", { class: "btn primary", onclick: check }, "Sprawdź");
     const fb = h("div");
+    el.append(sticky);
     if (opts.intro) el.append(opts.intro);
     el.append(
       h("div", { class: "story" }, h("div", { class: "who" }, t.q), h("div", { class: "muted" }, t.pl)),
       h("div", { class: "card" }, text),
-      h("div", { class: "muted", style: "margin:0 4px" }, "Dotknij słowa pasującego do podświetlonej luki:"),
-      bank, fb
+      checkBtn, fb
     );
-    const mark = () => gapEls.forEach((g, k) => g.classList.toggle("cur", k === cur));
-    mark();
 
-    for (const b of bankWords) {
-      const tile = h("button", { class: "tile" }, b.w);
-      tile.addEventListener("click", () => {
-        if (cur >= gaps.length) return;
-        if (b.w === gaps[cur] && !tile.classList.contains("used")) {
-          beep(true);
-          gapEls[cur].classList.add("filled");
-          tile.classList.add("used");
-          addXP(4);
-          cur++;
-          mark();
-          if (cur < gaps.length) gapEls[cur].scrollIntoView({ behavior: "smooth", block: "center" });
-          else finish();
+    const wordById = (id) => bank.find((b) => b.id === id);
+    const usedIds = () => filled.filter((x) => x != null);
+
+    function place(id, k) {
+      if (locked[k]) return;
+      const prev = filled.indexOf(id);
+      if (prev >= 0 && !locked[prev]) filled[prev] = null;
+      filled[k] = id;
+      gapEls[k].classList.remove("bad");
+      selWord = null;
+      selGap = null;
+      const nextEmpty = filled.findIndex((x, j) => x == null && !locked[j]);
+      draw();
+      if (nextEmpty >= 0 && checks === 0) { /* bez automatycznego wyboru – dowolna kolejność */ }
+    }
+    function tapWord(id) {
+      if (selGap != null) return place(id, selGap);
+      selWord = selWord === id ? null : id;
+      draw();
+    }
+    function tapGap(k) {
+      if (locked[k]) return;
+      if (selWord != null) return place(selWord, k);
+      if (filled[k] != null) { filled[k] = null; selGap = k; draw(); return; }
+      selGap = selGap === k ? null : k;
+      draw();
+    }
+
+    function draw() {
+      bankEl.innerHTML = "";
+      const used = usedIds();
+      for (const b of bank) {
+        const tile = h("div", { class: `tile ${used.includes(b.id) ? "used" : ""} ${selWord === b.id ? "sel" : ""}` }, b.w);
+        if (!used.includes(b.id)) {
+          enableDrag(tile, {
+            onTap: () => tapWord(b.id),
+            onMove: (x, y) => {
+              const g = document.elementFromPoint && document.elementFromPoint(x, y);
+              const gap = g && g.closest && g.closest(".g");
+              gapEls.forEach((e) => e.classList.toggle("hot", e === gap));
+            },
+            onDrop: (x, y) => {
+              gapEls.forEach((e) => e.classList.remove("hot"));
+              if (x == null) return;
+              const g = document.elementFromPoint && document.elementFromPoint(x, y);
+              const gap = g && g.closest && g.closest(".g");
+              if (gap) place(b.id, Number(gap.dataset.k));
+            },
+          });
+        }
+        bankEl.append(tile);
+      }
+      gapEls.forEach((g, k) => {
+        g.textContent = filled[k] != null ? wordById(filled[k]).w : "";
+        g.classList.toggle("filled", filled[k] != null);
+        g.classList.toggle("cur", selGap === k);
+        g.classList.toggle("ok", locked[k]);
+      });
+      const left = filled.filter((x) => x == null).length;
+      status.textContent = selWord != null ? "Teraz dotknij luki" : selGap != null ? "Teraz dotknij słowa" : left ? `Pustych luk: ${left}` : "Wszystko uzupełnione – sprawdź!";
+    }
+    draw();
+
+    function check() {
+      if (filled.some((x, k) => x == null && !locked[k])) {
+        if (!confirm("Nie wszystkie luki są uzupełnione. Sprawdzić mimo to?")) return;
+      }
+      checks++;
+      let wrong = 0;
+      gapEls.forEach((g, k) => {
+        if (locked[k]) return;
+        const got = filled[k] != null ? wordById(filled[k]).w : "";
+        g.querySelector && g.querySelector(".fix") && g.querySelector(".fix").remove();
+        if (got === gaps[k]) {
+          locked[k] = true;
+          g.classList.add("ok");
+          g.classList.remove("bad");
         } else {
-          beep(false);
-          mistakes++;
-          tile.classList.add("shake");
-          setTimeout(() => tile.classList.remove("shake"), 500);
+          wrong++;
+          g.classList.add("bad");
+          g.innerHTML = `${esc(got || "—")} <span class="fix">→ ${esc(gaps[k])}</span>`;
         }
       });
-      bank.append(tile);
+      mistakes += wrong;
+      beep(!wrong);
+      fb.innerHTML = "";
+      gapEls.forEach((g, k) => g.classList.toggle("cur", false));
+      if (!wrong) return finish();
+      checkBtn.hidden = true;
+      fb.append(
+        h("div", { class: "feedback bad pop" }, h("div", { class: "title" }, `Błędne luki: ${wrong}`), "Na czerwono twoja odpowiedź i poprawne słowo."),
+        h("button", { class: "btn primary", style: "margin-top:12px", onclick: retry }, "Popraw błędne"),
+        h("button", { class: "btn ghost", onclick: finish }, "Zakończ i pokaż wynik")
+      );
+    }
+    function retry() {
+      gapEls.forEach((g, k) => { if (!locked[k]) { filled[k] = null; g.classList.remove("bad"); } });
+      fb.innerHTML = "";
+      checkBtn.hidden = false;
+      draw();
     }
 
     function finish() {
       const plain = t.a.replace(/[{}]/g, "");
       const bk = "cloze" + i;
       if (S.best[bk] == null || mistakes < S.best[bk]) { S.best[bk] = mistakes; save(); }
-      const bonus = Math.max(0, 30 - mistakes * 5);
+      const bonus = Math.max(0, gaps.length * 4 + 20 - mistakes * 5);
       addXP(bonus);
-      bank.remove();
+      sticky.remove();
+      checkBtn.remove();
+      gapEls.forEach((g, k) => { g.textContent = gaps[k]; g.classList.add("ok"); g.classList.remove("bad", "cur"); });
+      fb.innerHTML = "";
       fb.append(
         h("div", { class: `feedback pop ${mistakes > 2 ? "bad" : ""}` },
           h("div", { class: "title" }, mistakes ? `Gotowe! Błędy: ${mistakes}` : "Bezbłędnie!"),
-          `+${bonus} XP bonusu`),
+          `+${bonus} XP`),
         h("button", { class: "btn", style: "margin-top:12px", onclick: () => speak(plain) }, "Odsłuchaj całą odpowiedź"),
         opts.onFinish
-          ? h("button", { class: "btn primary", onclick: () => opts.onFinish({ mistakes, total: gaps.length }) }, "Dalej")
+          ? h("button", { class: "btn primary", onclick: () => opts.onFinish({ mistakes, total: gaps.length }) }, opts.nextLabel || "Dalej")
           : [h("button", { class: "btn primary", onclick: () => clozeGame((i + 1) % TEXTS.length) }, "Następne pytanie"),
              h("button", { class: "btn ghost", onclick: clozeMenu }, "Lista pytań")]
       );
+      fb.scrollIntoView({ behavior: "smooth", block: "start" });
     }
   }, opts.back || clozeMenu);
 }
@@ -1123,45 +1468,49 @@ function clozeGame(i, opts = {}) {
 /* ---------- RPG: Praktykant ---------- */
 
 const wordsFrom = (...sets) => WORDS.filter((w) => sets.includes(w.set));
+const pickN = (n, make) => Array.from({ length: n }, make);
+function vocabSteps(n, pool, dir) {
+  return shuffle(pool).slice(0, n).map((w) => mcqVocab(w, pool, dir));
+}
 const DAYS = [
   {
     title: "Magazyn: przyjmujesz dostawę",
     who: "Herr Lerchner, kierownik magazynu",
     story: "Willkommen! Pierwszego dnia przychodzi duża dostawa, ale część towaru jest uszkodzona. Rozpoznaj usterki i słownictwo magazynowe.",
-    build: () => [
-      ...Array.from({ length: 6 }, () => genVocabQ(wordsFrom("usterki", "reklamacje", "beschaffung"), "pl-de")),
-      genPrefixQ(), genPrefixQ(),
-    ],
+    build: () => {
+      const d = deckOf(PREFIX_ITEMS.length);
+      return [...vocabSteps(6, wordsFrom("usterki", "reklamacje", "beschaffung"), "pl-de"), mcqPrefix(d()), mcqPrefix(d())];
+    },
   },
   {
     title: "Biuro: zamówienia i faktury",
     who: "Frau Sommer, księgowa",
     story: "Dziś pomagasz w biurze. Trzeba złożyć ofertę, udzielić zlecenia i uregulować rachunki – dopasuj właściwe czasowniki.",
-    build: () => Array.from({ length: 8 }, genCollocQ),
+    build: () => { const d = deckOf(COLLOCATIONS.length); return pickN(8, () => mcqColloc(d())); },
   },
   {
     title: "Szkolenie z higieny",
     who: "Pani z działu BHP",
     story: "Przed pracą w domu opieki każdy przechodzi szkolenie z higieny. Pokaż, że znasz słownictwo i wiesz, kiedy użyć „zu”.",
-    build: () => [
-      ...Array.from({ length: 5 }, () => genVocabQ(wordsFrom("higiena"))),
-      genZuQ(), genZuQ(), genZuQ(),
-    ],
+    build: () => { const d = deckOf(ZU_ITEMS.length); return [...vocabSteps(5, wordsFrom("higiena")), ...pickN(3, () => mcqZu(d()))]; },
   },
   {
     title: "U szefa: po co to robisz?",
     who: "Der Chef",
     story: "Szef pyta, po co i dlaczego robisz różne rzeczy. Łącz zdania: um…zu, damit, anstatt, ohne.",
-    build: () => [...Array.from({ length: 5 }, genConnectorQ), genGapQ(), genGapQ(), genGapQ()],
+    build: () => {
+      const c = deckOf(CONNECTORS.length), g = deckOf(GAPS.length);
+      return [...pickN(5, () => mcqConnector(c())), ...pickN(3, () => mcqGap(g()))];
+    },
   },
   {
     title: "Spotkanie z klientem",
     who: "Klient z Monachium",
     story: "Przychodzi ważny klient z zapytaniem ofertowym. Rozmowa ma być rzeczowa i przyjazna – uważaj na rodzajniki!",
     build: () => [
-      ...Array.from({ length: 4 }, () => genVocabQ(wordsFrom("oferty", "zlecenia"))),
-      ...Array.from({ length: 2 }, () => genVocabQ(wordsFrom("przymiotniki"), "pl-de")),
-      genArticleQ(), genArticleQ(),
+      ...vocabSteps(4, wordsFrom("oferty", "zlecenia")),
+      ...vocabSteps(2, wordsFrom("przymiotniki"), "pl-de"),
+      ...shuffle(nouns()).slice(0, 2).map(mcqArticle),
     ],
   },
   {
@@ -1227,12 +1576,11 @@ function rpgDay(i) {
     return;
   }
 
-  runQuiz({
+  runSession({
     title: `Dzień ${i + 1}`,
-    questions: d.build(),
+    steps: d.build(),
     intro,
     back: rpgMenu,
-    cols: 1,
     onFinish: (r, body) => {
       const ok = r.score / r.total >= 0.6;
       pass(ok);
@@ -1249,8 +1597,7 @@ function cheatsheet() {
     el.append(h("div", { class: "card", style: "background:#1e3a5f" },
       h("b", null, "Złota zasada: "),
       "ten sam podmiot → zu, um…zu, anstatt…zu, ohne…zu. Różne podmioty → dass, damit, anstatt dass, ohne dass."));
-    for (const c of CHEATSHEET) el.append(h("div", { class: "card" }, h("h3", null, c.title), h("div", { html: c.body })));
-    cleanup = () => el.classList.remove("cheat");
+    for (const c of CHEATSHEET) el.append(h("div", { class: "card", id: "rule-" + c.id }, h("h3", null, c.title), h("div", { html: c.body })));
   });
 }
 
@@ -1262,7 +1609,8 @@ function statsScreen() {
     for (const w of WORDS) counts[srsGet(w.key).b]++;
     const max = Math.max(...counts, 1);
     const labels = ["nowe", "1", "2", "3", "4", "5", "6"];
-    const bestNames = { quiz: "Quiz słówek", article: "der/die/das (60 s)", colloc: "Kolokacje", conn: "Łączenie zdań", gaps: "Luki", zu: "Zu czy bez zu (seria)", builder: "Układanka", prefix: "zer-/ver-" };
+    const bestNames = { quiz: "Quiz słówek", article: "der/die/das (60 s)", colloc: "Kolokacje", conn: "Łączenie zdań", gaps: "Luki", zu: "Zu czy bez zu", builder: "Układanka", prefix: "zer-/ver-" };
+    const memBest = Object.keys(S.best).filter((k) => /^memory\d*$/.test(k));
 
     el.append(
       h("div", { class: "card" },
@@ -1284,7 +1632,7 @@ function statsScreen() {
         h("b", null, "Rekordy"),
         h("table", { class: "stats" },
           Object.entries(bestNames).map(([k, n]) => h("tr", null, h("td", null, n), h("td", null, S.best[k] ?? "–"))),
-          h("tr", null, h("td", null, "Memory (najmniej ruchów)"), h("td", null, S.best.memory != null ? -S.best.memory : "–"))
+          memBest.map((k) => h("tr", null, h("td", null, `Memory ${k === "memory" ? "6" : k.slice(6)} par (ruchy)`), h("td", null, -S.best[k])))
         )
       ),
       h("div", { class: "section-title" }, "Kierunek tłumaczenia"),
@@ -1292,15 +1640,7 @@ function statsScreen() {
       h("div", { class: "section-title" }, "Działy słówek"),
       setPills(),
       h("div", { class: "section-title" }, "Dźwięk"),
-      h("button", {
-        class: `pill ${S.settings.sound ? "on" : ""}`,
-        onclick: (e) => {
-          S.settings.sound = !S.settings.sound;
-          save();
-          e.currentTarget.classList.toggle("on", S.settings.sound);
-          e.currentTarget.textContent = S.settings.sound ? "Dźwięki włączone" : "Dźwięki wyłączone";
-        },
-      }, S.settings.sound ? "Dźwięki włączone" : "Dźwięki wyłączone"),
+      togglePill("Dźwięki", () => S.settings.sound, (v) => (S.settings.sound = v)),
       h("button", {
         class: "btn red", style: "margin-top:24px",
         onclick: () => { if (confirm("Na pewno usunąć cały postęp?")) { S = defaults(); save(); updateChips(); home(); } },

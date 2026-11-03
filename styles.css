@@ -297,7 +297,9 @@ button, .tile, .bin, .card-flip, .mode {
 .mem.de.open { color: var(--gold); }
 .mem.done { background: #14532d; color: #bbf7d0; }
 .mem.miss { background: #7f1d1d; color: #fff; }
-@media (min-width: 520px) { .memory { grid-template-columns: repeat(4, 1fr); } .mem { font-size: 15px; } }
+.memory.dense { grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.memory.dense .mem { font-size: 12px; aspect-ratio: 1 / 1.15; padding: 4px; }
+@media (min-width: 520px) { .memory { grid-template-columns: repeat(4, 1fr); } .mem { font-size: 15px; } .memory.dense .mem { font-size: 14px; } }
 
 /* ---------- Tiles (sentence builder) ---------- */
 .zone {
@@ -364,21 +366,61 @@ button, .tile, .bin, .card-flip, .mode {
 .bin.bad { border-color: var(--red); background: #7f1d1d; }
 
 /* ---------- Cloze ---------- */
-.cloze { font-size: 18px; line-height: 1.9; }
+#screen.no-pad-top { padding-top: 0; }
+.bank-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  margin: 0 -16px 12px;
+  padding: 10px 16px 8px;
+  background: rgba(17, 24, 39, .96);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line);
+}
+.bank { display: flex; flex-wrap: wrap; gap: 6px; max-height: 34vh; overflow-y: auto; }
+.bank .tile { min-height: 40px; padding: 8px 11px; font-size: 16px; cursor: pointer; }
+.bank .tile.used { opacity: .22; pointer-events: none; }
+.tile.sel { background: var(--gold); color: #111; box-shadow: 0 0 0 3px rgba(245,179,1,.35); }
+.bank-status { font-size: 13px; margin-top: 6px; min-height: 18px; }
+.cloze { font-size: 18px; line-height: 2.1; }
 .cloze .g {
   display: inline-block;
-  min-width: 70px;
-  padding: 0 6px;
+  min-width: 76px;
+  min-height: 34px;
+  margin: 0 2px;
+  padding: 2px 8px;
+  border: 0;
   border-bottom: 2px solid var(--muted);
-  color: transparent;
-  text-align: center;
-  line-height: 1.4;
+  border-radius: 6px 6px 0 0;
+  background: rgba(255,255,255,.05);
+  color: var(--text);
+  font: inherit;
+  font-weight: 700;
+  line-height: 1.5;
+  vertical-align: baseline;
+  cursor: pointer;
 }
-.cloze .g.cur { border-color: var(--gold); background: rgba(245,179,1,.15); border-radius: 6px 6px 0 0; }
-.cloze .g.filled { color: var(--green); border-color: var(--green); font-weight: 700; }
-.bank { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
-.bank .tile { cursor: pointer; touch-action: manipulation; }
-.bank .tile.used { visibility: hidden; }
+.cloze .g.filled { color: #93c5fd; border-color: #93c5fd; }
+.cloze .g.cur, .cloze .g.hot { border-color: var(--gold); background: rgba(245,179,1,.22); }
+.cloze .g.ok { color: var(--green); border-color: var(--green); background: rgba(34,197,94,.12); cursor: default; }
+.cloze .g.bad { color: #fca5a5; border-color: var(--red); background: rgba(239,68,68,.15); }
+.cloze .g .fix { color: var(--green); font-weight: 800; }
+
+/* ---------- Explanations ---------- */
+mark.subj { background: rgba(59,130,246,.3); color: #bfdbfe; border-radius: 4px; padding: 0 3px; }
+b.ans { color: var(--gold); }
+.feedback .picked { margin: 6px 0; }
+.feedback .why-not { margin-top: 4px; color: #fca5a5; font-size: 15px; }
+.feedback .explain { margin-top: 6px; }
+.feedback .why { margin-top: 6px; }
+.feedback .after { margin-top: 8px; font-size: 16px; }
+.two-sent.small { font-size: 15px; margin-bottom: 6px; }
+.two-sent.small div { padding: 6px 10px; }
+.rule-box { margin-top: 10px; padding: 12px; border-radius: 12px; background: #1e3a5f; font-size: 15px; }
+.rule-box h3 { margin: 0 0 6px; font-size: 16px; color: var(--gold); }
+.emo { font-size: 1.3em; }
+.drop-pl { margin-top: 10px; color: var(--gold); font-weight: 600; }
 
 /* ---------- RPG ---------- */
 .day {
