@@ -77,7 +77,7 @@ const defaults = () => ({
   srs: {},
   best: {},
   rpg: { done: [] },
-  settings: { dir: "de-pl", sets: VOCAB.map((s) => s.id), sound: true },
+  settings: { dir: "de-pl", sets: VOCAB.map((s) => s.id), sound: true, flashCount: 20 },
 });
 
 let S = load();
@@ -534,59 +534,126 @@ function zuGame() {
 
 /* ---------- Flashcards ---------- */
 
+const FLASH_PRESETS = [10, 20, 30, 50, 0];
+
+function flashCount(available) {
+  const n = S.settings.flashCount;
+  return n > 0 ? Math.min(n, available) : available;
+}
+
 function flashSetup() {
   show("Fiszki", (el) => {
-    const pool = activeWords();
-    const due = dueWords(pool);
-    const fresh = pool.filter((w) => !S.srs[w.key]);
+    const info = h("div");
+    const presets = h("div");
+    const input = h("input", { class: "num-input", type: "number", inputmode: "numeric", min: "1", "aria-label": "Liczba fiszek" });
+    const startBtn = h("button", { class: "btn primary", style: "margin-top:16px", onclick: () => flashSession(false) });
+    const randomBtn = h("button", { class: "btn ghost", onclick: () => flashSession(true) });
+
+    function refresh() {
+      const pool = activeWords();
+      const due = dueWords(pool).length;
+      const fresh = pool.filter((w) => !S.srs[w.key]).length;
+      const learnable = due + fresh || pool.length;
+      info.innerHTML = "";
+      info.append(
+        h("div", null, h("b", null, `Do powtórki: ${due}`), ` · nowe: ${fresh} · w działach: ${pool.length}`),
+        h("div", { class: "muted", style: "margin-top:6px;font-size:15px" }, "Najpierw lecą powtórki, potem nowe słówka. Znane wracają coraz rzadziej, nieznane – szybko.")
+      );
+      for (const b of presets.children) b.classList.toggle("on", Number(b.dataset.n) === (S.settings.flashCount || 0));
+      if (document.activeElement !== input) input.value = S.settings.flashCount > 0 ? S.settings.flashCount : "";
+      input.placeholder = `wszystkie (${pool.length})`;
+      startBtn.textContent = `Ucz się (${flashCount(learnable)} kart)`;
+      startBtn.disabled = !pool.length;
+      randomBtn.textContent = `Losowe ${flashCount(pool.length)} ze wszystkich wybranych`;
+      randomBtn.disabled = !pool.length;
+    }
+
+    const setCount = (n) => { S.settings.flashCount = n; save(); refresh(); };
+    for (const n of FLASH_PRESETS) {
+      presets.append(h("button", { class: "pill", "data-n": n, onclick: () => setCount(n) }, n ? String(n) : "Wszystkie"));
+    }
+    const step = (d) => {
+      const max = activeWords().length || 1;
+      const cur = S.settings.flashCount > 0 ? S.settings.flashCount : max;
+      setCount(Math.max(1, Math.min(max, cur + d)));
+    };
+    input.addEventListener("input", () => {
+      const v = parseInt(input.value, 10);
+      if (v > 0) setCount(v);
+    });
+    input.addEventListener("blur", refresh);
+
     el.append(
-      h("div", { class: "card" },
-        h("div", null, h("b", null, `Do powtórki: ${due.length}`), " · ", `nowe: ${fresh.length}`),
-        h("div", { class: "muted", style: "margin-top:6px;font-size:15px" }, "Słówka, które znasz, wracają coraz rzadziej. Te, których nie znasz – szybko wracają.")
+      h("div", { class: "card" }, info),
+      h("div", { class: "section-title" }, "Ile fiszek w sesji"),
+      presets,
+      h("div", { class: "stepper" },
+        h("button", { class: "icon-btn", "aria-label": "Mniej", onclick: () => step(-5) }, "−"),
+        input,
+        h("button", { class: "icon-btn", "aria-label": "Więcej", onclick: () => step(5) }, "+")
       ),
       h("div", { class: "section-title" }, "Kierunek"),
-      dirPills(() => flashSetup()),
+      dirPills(refresh),
       h("div", { class: "section-title" }, "Działy (wspólne dla wszystkich trybów)"),
-      setPills(() => flashSetup()),
-      h("button", { class: "btn primary", style: "margin-top:16px", onclick: () => flashSession(false) }, `Ucz się (${Math.min(20, due.length + fresh.length) || 20} kart)`),
-      h("button", { class: "btn ghost", onclick: () => flashSession(true) }, "Losowe 20 ze wszystkich wybranych")
+      setPills(refresh),
+      startBtn,
+      randomBtn
     );
+    refresh();
   });
 }
 
-function dirPills(rerender) {
-  return h("div", null,
-    [["de-pl", "Niemiecki → polski"], ["pl-de", "Polski → niemiecki"]].map(([v, label]) =>
-      h("button", { class: `pill ${S.settings.dir === v ? "on" : ""}`, onclick: () => { S.settings.dir = v; save(); rerender(); } }, label))
-  );
+function dirPills(onChange) {
+  const wrap = h("div");
+  for (const [v, label] of [["de-pl", "Niemiecki → polski"], ["pl-de", "Polski → niemiecki"]]) {
+    const b = h("button", { class: `pill ${S.settings.dir === v ? "on" : ""}` }, label);
+    b.addEventListener("click", () => {
+      S.settings.dir = v;
+      save();
+      for (const x of wrap.children) x.classList.toggle("on", x === b);
+      onChange && onChange();
+    });
+    wrap.append(b);
+  }
+  return wrap;
 }
-function setPills(rerender) {
-  return h("div", null,
-    h("button", { class: "pill", onclick: () => { S.settings.sets = S.settings.sets.length === VOCAB.length ? [] : VOCAB.map((s) => s.id); save(); rerender(); } }, "Wszystkie / żadne"),
-    VOCAB.map((s) => {
+
+function setPills(onChange) {
+  const btns = {};
+  const sync = () => { for (const id in btns) btns[id].classList.toggle("on", S.settings.sets.includes(id)); };
+  const all = h("button", { class: "pill" }, "Wszystkie / żadne");
+  all.addEventListener("click", () => {
+    S.settings.sets = S.settings.sets.length === VOCAB.length ? [] : VOCAB.map((s) => s.id);
+    save();
+    sync();
+    onChange && onChange();
+  });
+  for (const s of VOCAB) {
+    const b = h("button", { class: "pill" }, `${s.name} (${s.words.length})`);
+    b.addEventListener("click", () => {
       const on = S.settings.sets.includes(s.id);
-      return h("button", {
-        class: `pill ${on ? "on" : ""}`,
-        onclick: () => {
-          S.settings.sets = on ? S.settings.sets.filter((x) => x !== s.id) : [...S.settings.sets, s.id];
-          save();
-          rerender();
-        },
-      }, `${s.name} (${s.words.length})`);
-    })
-  );
+      S.settings.sets = on ? S.settings.sets.filter((x) => x !== s.id) : [...S.settings.sets, s.id];
+      save();
+      sync();
+      onChange && onChange();
+    });
+    btns[s.id] = b;
+  }
+  sync();
+  return h("div", null, all, Object.values(btns));
 }
 
 function flashSession(random) {
   const pool = activeWords();
   let queue;
-  if (random) queue = shuffle(pool).slice(0, 20);
+  if (random) queue = shuffle(pool);
   else {
     const due = shuffle(dueWords(pool)).sort((a, b) => srsGet(a.key).b - srsGet(b.key).b);
     const fresh = shuffle(pool.filter((w) => !S.srs[w.key]));
-    queue = [...due, ...fresh].slice(0, 20);
-    if (!queue.length) queue = shuffle(pool).slice(0, 20);
+    queue = [...due, ...fresh];
+    if (!queue.length) queue = shuffle(pool);
   }
+  queue = queue.slice(0, flashCount(queue.length));
   const toPl = S.settings.dir === "de-pl";
   let known = 0, seen = 0;
 
@@ -1221,11 +1288,19 @@ function statsScreen() {
         )
       ),
       h("div", { class: "section-title" }, "Kierunek tłumaczenia"),
-      dirPills(statsScreen),
+      dirPills(),
       h("div", { class: "section-title" }, "Działy słówek"),
-      setPills(statsScreen),
+      setPills(),
       h("div", { class: "section-title" }, "Dźwięk"),
-      h("button", { class: `pill ${S.settings.sound ? "on" : ""}`, onclick: () => { S.settings.sound = !S.settings.sound; save(); statsScreen(); } }, S.settings.sound ? "Dźwięki włączone" : "Dźwięki wyłączone"),
+      h("button", {
+        class: `pill ${S.settings.sound ? "on" : ""}`,
+        onclick: (e) => {
+          S.settings.sound = !S.settings.sound;
+          save();
+          e.currentTarget.classList.toggle("on", S.settings.sound);
+          e.currentTarget.textContent = S.settings.sound ? "Dźwięki włączone" : "Dźwięki wyłączone";
+        },
+      }, S.settings.sound ? "Dźwięki włączone" : "Dźwięki wyłączone"),
       h("button", {
         class: "btn red", style: "margin-top:24px",
         onclick: () => { if (confirm("Na pewno usunąć cały postęp?")) { S = defaults(); save(); updateChips(); home(); } },
