@@ -451,6 +451,7 @@ function runSession(cfg) {
     let i = 0, score = 0, lives = cfg.lives || 0, combo = 0, xpGained = 0, answered = 0;
     let timeLeft = cfg.seconds || 0, timerId = null, finished = false;
     const total = cfg.steps ? cfg.steps.length : cfg.n || 0;
+    const log = [];
 
     const hud = h("div", { class: "hud" });
     const body = h("div");
@@ -491,6 +492,7 @@ function runSession(cfg) {
       let doneOnce = false;
       RENDERERS[step.kind](stage, step, {
         timed: !!cfg.seconds,
+        test: !!cfg.test,
         done: (res) => {
           if (doneOnce || finished) return;
           doneOnce = true;
@@ -501,6 +503,14 @@ function runSession(cfg) {
 
     function result(step, res, stage) {
       answered++;
+      log.push({ step, res });
+      if (cfg.test) {
+        if (res.ok) score++;
+        if (step.ref) recordAnswer(step.ref, res.ok);
+        i++;
+        setTimeout(next, 250);
+        return;
+      }
       beep(res.ok);
       if (step.onResult) step.onResult(res.ok);
       if (step.ref) recordAnswer(step.ref, res.ok);
@@ -534,9 +544,10 @@ function runSession(cfg) {
       finished = true;
       if (timerId) clearInterval(timerId);
       const record = cfg.key ? setBest(cfg.key, score) : false;
-      const result = { score, answered, total: total || answered, xp: xpGained };
+      const result = { score, answered, total: total || answered, xp: xpGained, log };
       body.innerHTML = "";
       hud.innerHTML = "";
+      if (cfg.test) return cfg.onFinish(result, body);
       body.append(
         h("div", { class: "card center pop" },
           h("div", { class: "muted" }, cfg.seconds ? "Koniec czasu!" : outOfLives() ? "Koniec żyć!" : "Koniec rundy"),
@@ -572,12 +583,15 @@ RENDERERS.mcq = (el, q, ctx) => {
       if (locked) return;
       locked = true;
       const ok = q.correct.includes(o);
-      for (const x of opts.children) {
-        if (q.correct.includes(x.textContent)) x.classList.add("ok");
-        else if (x === b) x.classList.add("bad");
-        else x.classList.add("dim");
+      if (ctx.test) b.classList.add("sel");
+      else {
+        for (const x of opts.children) {
+          if (q.correct.includes(x.textContent)) x.classList.add("ok");
+          else if (x === b) x.classList.add("bad");
+          else x.classList.add("dim");
+        }
+        if (!ok) opts.classList.add("shake");
       }
-      if (!ok) opts.classList.add("shake");
       ctx.done({
         ok,
         given: o,
@@ -1174,13 +1188,14 @@ RENDERERS.builder = (el, step, ctx) => {
     showBtn.remove();
     fb.innerHTML = "";
     ctx.done({ ok, given, expected: target, explain: ok ? `<i>${esc(target)}</i>` : null, after: null });
-    if (ok) speak(target);
+    if (ok && !ctx.test) speak(target);
   };
 
   checkBtn.addEventListener("click", () => {
     if (pool.length) { toast("Użyj wszystkich słów"); return; }
     const got = answer.map((t) => t.w).join(" ");
     tries++;
+    if (ctx.test) return finishStep(got === target, got);
     if (got === target) {
       [...ansZone.children].forEach((c) => c.classList.add("right"));
       finishStep(tries === 1, null);
@@ -1194,6 +1209,7 @@ RENDERERS.builder = (el, step, ctx) => {
     }
   });
   showBtn.addEventListener("click", () => finishStep(false, answer.map((t) => t.w).join(" ")));
+  if (ctx.test) showBtn.textContent = "Pomiń";
 };
 
 const builderStep = (i) => ({ kind: "builder", i, xp: 20, ref: { t: "builder", i } });
@@ -1253,8 +1269,11 @@ RENDERERS.prefix = (el, step, ctx) => {
     if (locked) return;
     locked = true;
     const ok = id === it.bin;
-    binEls[it.bin].classList.add("ok");
-    if (!ok) binEls[id].classList.add("bad");
+    if (ctx.test) binEls[id].classList.add("hot");
+    else {
+      binEls[it.bin].classList.add("ok");
+      if (!ok) binEls[id].classList.add("bad");
+    }
     cardEl.style.visibility = "hidden";
     plLine.hidden = true;
     ctx.done({

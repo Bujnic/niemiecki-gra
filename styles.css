@@ -250,6 +250,10 @@ button, .tile, .bin, .card-flip, .mode {
 .opt.ok { background: var(--green); color: #052e16; }
 .opt.bad { background: var(--red); color: #fff; }
 .opt.dim { opacity: .45; }
+.opt.sel { background: var(--blue); color: #fff; }
+.card.review .prompt { background: var(--card2); padding: 14px; margin-bottom: 8px; }
+.card.review .prompt .big { font-size: 20px; }
+.card.review .prompt .sent { font-size: 17px; }
 .options.big .opt { min-height: 84px; font-size: 24px; font-weight: 800; }
 
 .feedback {
