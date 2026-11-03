@@ -539,7 +539,7 @@ function runSession(cfg) {
       const nextBtn = h("button", { class: "btn primary", style: "margin-top:14px" }, total && i >= total ? "Wynik" : "Dalej");
       nextBtn.addEventListener("click", () => (outOfLives() ? finish() : next()));
       stage.append(fb, nextBtn);
-      if (res.ok && !res.explain && !res.after) setTimeout(() => nextBtn.isConnected && nextBtn.click(), 700);
+      if (res.ok && !res.almost && !res.explain) setTimeout(() => nextBtn.isConnected && nextBtn.click(), res.after ? 1300 : 700);
       else nextBtn.scrollIntoView({ behavior: "smooth", block: "end" });
     }
 
