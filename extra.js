@@ -156,7 +156,11 @@ function checkTyped(input, target, requireArticle) {
     const rank = { ok: 0, almost: 1, wrong: 2 }[status];
     if (!best || rank < best.rank || (rank === best.rank && dist < best.dist)) best = { status, note, dist, rank, v };
   }
-  return { status: best.status, note: best.note, best: best.v, diff: charDiffHTML(raw, best.v) };
+  const t = splitArticle(best.v), u = splitArticle(raw);
+  let diff;
+  if (t.art && u.art !== t.art) diff = `${u.art ? `<del>${esc(u.art)}</del> ` : ""}<ins>${t.art}</ins> ${charDiffHTML(u.core, t.core)}`;
+  else diff = charDiffHTML(raw, best.v);
+  return { status: best.status, note: best.note, best: best.v, diff };
 }
 
 /* Pole tekstowe bez autokorekty + przyciski ä ö ü ß */
@@ -226,6 +230,135 @@ function typeStep(w) {
     onResult: (ok, res) => { if (!res || !res.almost) srsRecord(w.key, ok); },
   };
 }
+
+/* ================= Dyktando ================= */
+
+const plainSentences = (text) => text.replace(/[{}]/g, "").match(/[^.!?]+[.!?]/g).map((x) => x.trim());
+const INTERVIEW_SENTENCES = () => TEXTS.flatMap((t) => plainSentences(t.a));
+const tokens = (s) => s.replace(/[„”"“…]/g, " ").split(/\s+/).map((w) => w.replace(/^[^\wäöüÄÖÜß]+|[^\wäöüÄÖÜß]+$/g, "")).filter(Boolean);
+
+/* Porównanie na poziomie słów (LCS z tolerancją literówek). */
+function wordDiff(given, target) {
+  const a = tokens(given), b = tokens(target);
+  const eq = (x, y) => {
+    const fx = foldDe(x), fy = foldDe(y);
+    if (fx === fy) return 2;
+    const d = levenshtein(fx, fy);
+    return fy.length > 3 && d <= (fy.length > 8 ? 2 : 1) ? 1 : 0;
+  };
+  const L = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
+  for (let i = a.length - 1; i >= 0; i--)
+    for (let j = b.length - 1; j >= 0; j--)
+      L[i][j] = eq(a[i], b[j]) ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+  let i = 0, j = 0, exact = 0, typo = 0, extra = 0;
+  const out = [];
+  while (i < a.length && j < b.length) {
+    const e = eq(a[i], b[j]);
+    if (e && L[i][j] === L[i + 1][j + 1] + 1) {
+      if (e === 2) { exact++; out.push(`<span class="wok">${esc(b[j])}</span>`); }
+      else { typo++; out.push(`<span class="wtypo">${charDiffHTML(a[i], b[j])}</span>`); }
+      i++; j++;
+    } else if (L[i + 1][j] >= L[i][j + 1]) { extra++; out.push(`<span class="wbad">${esc(a[i])}</span>`); i++; }
+    else { out.push(`<span class="wmiss">${esc(b[j])}</span>`); j++; }
+  }
+  while (i < a.length) { extra++; out.push(`<span class="wbad">${esc(a[i++])}</span>`); }
+  while (j < b.length) out.push(`<span class="wmiss">${esc(b[j++])}</span>`);
+  const total = b.length;
+  return { html: out.join(" "), exact, typo, extra, total, pct: Math.round(((exact + typo * 0.75) / Math.max(1, total)) * 100) };
+}
+
+RENDERERS.dict = (el, step, ctx) => {
+  const text = step.text;
+  const isWord = tokens(text).length <= 3;
+  const { input, keys } = germanInput({ multiline: !isWord, placeholder: "Wpisz, co słyszysz" });
+  const rate = () => (S.settings.slowTTS ? 0.6 : 0.9);
+  const play = () => {
+    if (!("speechSynthesis" in window)) { toast("Ta przeglądarka nie ma syntezy mowy"); return; }
+    speak(text, rate());
+  };
+  const playBtn = h("button", { class: "btn play-btn", onclick: play }, "▶  Odsłuchaj");
+  const again = h("button", { class: "btn small ghost", onclick: play }, "Powtórz");
+  const slow = togglePill("Wolniej", () => !!S.settings.slowTTS, (v) => (S.settings.slowTTS = v));
+  const checkBtn = h("button", { class: "btn primary" }, "Sprawdź");
+  const skipBtn = h("button", { class: "btn ghost" }, "Pokaż tekst");
+  el.append(
+    h("div", { class: "prompt pop" },
+      h("div", { class: "hint" }, isWord ? "Dyktando – słówko" : "Dyktando – zdanie"),
+      playBtn,
+      h("div", { class: "row", style: "justify-content:center;gap:8px;margin-top:10px" }, again, slow)),
+    input, keys, checkBtn, skipBtn);
+  play();
+
+  let done = false;
+  const finish = (given) => {
+    if (done) return;
+    done = true;
+    if (window.speechSynthesis) window.speechSynthesis.cancel();
+    input.disabled = true;
+    [checkBtn, skipBtn, keys].forEach((x) => x.remove());
+    const d = wordDiff(given || "", text);
+    const perfect = d.exact === d.total && !d.extra;
+    const ok = d.exact + d.typo === d.total && !d.extra;
+    if (perfect) S.stats.dictPerfect = (S.stats.dictPerfect || 0) + 1;
+    ctx.done({
+      ok,
+      almost: ok && !perfect,
+      almostWhy: "literówki zaznaczone na żółto.",
+      given: perfect ? null : given || "",
+      expected: text,
+      explain: given ? `<div class="diff words">${d.html}</div><div class="muted" style="font-size:13px">zielone = dobrze · żółte = literówka · podkreślone = brakuje · przekreślone = zbędne · ${d.pct}%</div>` : null,
+      pct: d.pct,
+    });
+  };
+  checkBtn.addEventListener("click", () => { if (input.value.trim()) finish(input.value); else input.focus(); });
+  skipBtn.addEventListener("click", () => finish(""));
+  if (isWord) input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); if (input.value.trim()) finish(input.value); } });
+};
+
+const dictStep = (text) => ({ kind: "dict", text, xp: 15, ref: { t: "dict", k: text } });
+const dictStepFromRef = (ref) => dictStep(ref.k);
+
+const DICT_SOURCES = [
+  { id: "words", name: "Słówka (z wybranych działów)", items: () => activeWords().map((w) => w.de) },
+  { id: "sentences", name: "Zdania z ćwiczeń", items: () => SENTENCES },
+  { id: "interview", name: "Zdania z rozmowy o pracę", items: INTERVIEW_SENTENCES },
+];
+const dictSource = () => DICT_SOURCES.find((s) => s.id === (S.settings.dictSource || "sentences"));
+
+function sourcePills(key, sources, def, onChange) {
+  const wrap = h("div");
+  for (const s of sources) {
+    const b = h("button", { class: `pill ${(S.settings[key] || def) === s.id ? "on" : ""}` }, s.name);
+    b.addEventListener("click", () => {
+      S.settings[key] = s.id;
+      save();
+      for (const x of wrap.children) x.classList.toggle("on", x === b);
+      onChange && onChange();
+    });
+    wrap.append(b);
+  }
+  return wrap;
+}
+
+function dictSetup() {
+  setupScreen({
+    id: "dict", title: "Dyktando",
+    info: () => h("div", null,
+      "Telefon czyta po niemiecku, a ty wpisujesz. Literówki i wielkość liter są wybaczane, różnice zobaczysz słowo po słowie.",
+      !("speechSynthesis" in window) ? h("div", { class: "warn" }, "Ta przeglądarka nie obsługuje syntezy mowy – dyktando nie zadziała.") : null),
+    count: { label: "Ile nagrań", presets: [5, 10, 20, 0], def: 10, available: () => dictSource().items().length },
+    options: (refresh) => [
+      h("div", { class: "section-title" }, "Co dyktować"), sourcePills("dictSource", DICT_SOURCES, "sentences", refresh),
+      h("div", { class: "section-title" }, "Tempo"), togglePill("Wolniej", () => !!S.settings.slowTTS, (v) => (S.settings.slowTTS = v)),
+    ],
+    buttons: [{ label: (n) => `Start (${n})`, run: (n) => {
+      const items = shuffle(dictSource().items()).slice(0, n);
+      runSession({ key: "dict", title: "Dyktando", steps: items.map(dictStep), back: dictSetup, again: dictSetup });
+    } }],
+  });
+}
+
+EXTRA_MODES.push({ id: "dict", name: "Dyktando", badge: "♪", color: "#fdba74", run: () => dictSetup(), desc: "Słuchaj i zapisuj" });
 
 /* ================= Sprawdzian ================= */
 
