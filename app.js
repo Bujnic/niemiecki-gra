@@ -100,6 +100,8 @@ const defaults = () => ({
   srs: {},
   best: {},
   rpg: { done: [] },
+  errors: {},
+  stats: { correct: {}, wrong: {}, errorsFixed: 0 },
   settings: { dir: "de-pl", sets: VOCAB.map((s) => s.id), sound: true, counts: {}, prefixPl: false },
 });
 
@@ -110,7 +112,7 @@ function load() {
     const raw = JSON.parse(localStorage.getItem(STORE_KEY));
     if (!raw) return defaults();
     const d = defaults();
-    const s = { ...d, ...raw, settings: { ...d.settings, ...raw.settings }, rpg: { ...d.rpg, ...raw.rpg } };
+    const s = { ...d, ...raw, settings: { ...d.settings, ...raw.settings }, rpg: { ...d.rpg, ...raw.rpg }, stats: { ...d.stats, ...raw.stats } };
     if (s.settings.flashCount != null && s.settings.counts.flash == null) s.settings.counts.flash = s.settings.flashCount;
     delete s.settings.flashCount;
     return s;
@@ -262,7 +264,8 @@ function countValue(id, c) {
 function countFor(id, c, available) {
   const v = countValue(id, c);
   const max = c.all === false ? c.max : available;
-  return v > 0 ? clamp(v, c.min || 1, max) : max;
+  if (!(max >= 1)) return 0;
+  return v > 0 ? clamp(v, Math.min(c.min || 1, max), max) : max;
 }
 
 function countPicker(id, c, onChange) {
@@ -500,6 +503,7 @@ function runSession(cfg) {
       answered++;
       beep(res.ok);
       if (step.onResult) step.onResult(res.ok);
+      if (step.ref) recordAnswer(step.ref, res.ok);
       if (res.ok) {
         combo++;
         score++;
@@ -606,6 +610,7 @@ function mcqVocab(w, pool, dir = S.settings.dir) {
     options: shuffle([correct, ...distract]),
     correct: [correct],
     after: w.emoji ? `${emojiAfter(w)}<b>${esc(w.de)}</b> – ${esc(w.pl)}` : null,
+    ref: { t: "vocab", k: w.key, d: dir },
     onResult: (ok) => srsRecord(w.key, ok),
   };
 }
@@ -626,6 +631,7 @@ function mcqArticle(w) {
     options: ["der", "die", "das"],
     correct: [w.art],
     explain: `<b>${esc(w.de)}</b> – ${esc(w.pl)}`,
+    ref: { t: "article", k: w.key },
     cols: 3,
     big: true,
   };
@@ -641,6 +647,7 @@ function mcqColloc(i) {
     options: shuffle([c.gap, ...distract]),
     correct: [c.gap],
     explain: `<b>${esc(c.stem.replace("___", c.gap))}</b> – ${esc(c.pl)}`,
+    ref: { t: "colloc", i },
     cols: 2,
   };
 }
@@ -664,6 +671,7 @@ function mcqConnector(i) {
     prompt: `<div class="two-sent"><div>${esc(c.a)}</div><div>${esc(c.b)}</div></div><div class="hint">Jak połączysz te zdania?</div>`,
     options: CONNECTOR_OPTS,
     correct: c.answers,
+    ref: { t: "conn", i },
     cols: 2,
     rule: c.rule,
     whyNot,
@@ -690,6 +698,7 @@ function mcqGap(i) {
     prompt: `<div class="sent">${gapHTML(g.s)}</div>`,
     options: (g.opts || GAP_OPTS).map(fix),
     correct: [g.a],
+    ref: { t: "gap", i },
     cols: 3,
     rule: g.rule,
     whyNot: (o) => GAP_NO[o.toLowerCase()] || null,
@@ -714,6 +723,7 @@ function mcqZu(i) {
     prompt: `<div class="sent">${gapHTML(z.s)}</div>`,
     options: shuffle(z.opts),
     correct: [correct],
+    ref: { t: "zu", i },
     rule: z.rule,
     whyNot,
     explain: `<i>${esc(z.s.replace("___", correct))}</i><div class="why">${esc(z.why)}</div>`,
@@ -732,6 +742,7 @@ function mcqPrefix(i) {
     prompt: `<div class="big">${esc(p.w)}</div><div class="hint">Co oznacza przedrostek?</div>`,
     options: Object.values(BINS).map((b) => b.name),
     correct: [BINS[p.bin].name],
+    ref: { t: "prefix", i },
     rule: p.bin === "zer" ? "zer" : "ver",
     explain: `<b>${esc(p.w)}</b> – ${esc(p.pl)}: ${esc(BINS[p.bin].reason)}`,
   };
@@ -775,6 +786,7 @@ function home() {
         h("span", { class: "badge", style: "background:#fde68a" }, "RPG"),
         h("span", null, h("b", null, "Praktykant w niemieckiej firmie"), h("br"), h("small", { style: "color:#fde68a" }, "6 dni pracy – wszystko z zeszytu w jednej fabule"))
       ),
+      homeExtras(),
       h("div", { class: "section-title" }, "Tryby gry"),
       h("div", { class: "modes" },
         MODES.map((m) =>
@@ -937,6 +949,7 @@ function flashSession(random, n) {
 
       function rate(ok) {
         srsRecord(w.key, ok);
+        recordAnswer({ t: "vocab", k: w.key, d: S.settings.dir }, ok);
         beep(ok);
         queue.shift();
         if (ok) { known++; seen++; addXP(5); }
@@ -1183,13 +1196,15 @@ RENDERERS.builder = (el, step, ctx) => {
   showBtn.addEventListener("click", () => finishStep(false, answer.map((t) => t.w).join(" ")));
 };
 
+const builderStep = (i) => ({ kind: "builder", i, xp: 20, ref: { t: "builder", i } });
+
 function builderSetup() {
   setupScreen({
     id: "builder", title: "Układanka zdań",
     count: COUNT_STD("Ile zdań", 8, () => SENTENCES.length),
     buttons: [{ label: (n) => `Start (${n} zdań)`, run: (n) => {
       const deck = deckOf(SENTENCES.length);
-      runSession({ key: "builder", title: "Układanka zdań", n, gen: () => ({ kind: "builder", i: deck(), xp: 20 }), back: builderSetup });
+      runSession({ key: "builder", title: "Układanka zdań", n, gen: () => builderStep(deck()), back: builderSetup });
     } }],
   });
 }
@@ -1252,6 +1267,8 @@ RENDERERS.prefix = (el, step, ctx) => {
   }
 };
 
+const prefixStep = (i) => ({ kind: "prefix", i, ref: { t: "prefix", i } });
+
 function prefixSetup() {
   setupScreen({
     id: "prefix", title: "zer- / ver-",
@@ -1263,7 +1280,7 @@ function prefixSetup() {
     buttons: [{ label: (n) => `Start (${n} słów)`, run: (n) => {
       const deck = deckOf(PREFIX_ITEMS.length);
       runSession({
-        key: "prefix", title: "zer- / ver-", n, gen: () => ({ kind: "prefix", i: deck() }), back: prefixSetup,
+        key: "prefix", title: "zer- / ver-", n, gen: () => prefixStep(deck()), back: prefixSetup,
         onFinish: (r, body) => body.append(
           h("div", { class: "muted center", style: "margin:8px 0 14px" }, "Pamiętaj: zer- i ver- nie łączą się z ge- w Partizip II (zerrissen, verlassen)."),
           h("button", { class: "btn primary", onclick: () => prefixSetup() }, "Jeszcze raz"),
@@ -1444,6 +1461,7 @@ function clozeGame(i, opts = {}) {
       const plain = t.a.replace(/[{}]/g, "");
       const bk = "cloze" + i;
       if (S.best[bk] == null || mistakes < S.best[bk]) { S.best[bk] = mistakes; save(); }
+      recordAnswer({ t: "cloze", i }, mistakes === 0);
       const bonus = Math.max(0, gaps.length * 4 + 20 - mistakes * 5);
       addXP(bonus);
       sticky.remove();
@@ -1654,8 +1672,10 @@ function statsScreen() {
 document.addEventListener("dblclick", (e) => e.preventDefault(), { passive: false });
 document.addEventListener("gesturestart", (e) => e.preventDefault());
 
-updateChips();
-home();
+document.addEventListener("DOMContentLoaded", () => {
+  updateChips();
+  home();
+});
 
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
   window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));

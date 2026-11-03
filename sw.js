@@ -1,5 +1,5 @@
 // Zwiększ VERSION po każdej zmianie plików, żeby telefon pobrał nową wersję.
-const VERSION = "v3";
+const VERSION = "v4";
 const CACHE = `niemiecki-b2-${VERSION}`;
 const FILES = [
   "./",
@@ -7,6 +7,7 @@ const FILES = [
   "styles.css",
   "data.js",
   "app.js",
+  "extra.js",
   "manifest.webmanifest",
   "icons/icon-192.png",
   "icons/icon-512.png",
