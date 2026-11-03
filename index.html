@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <title>Niemiecki B2</title>
+  <meta name="description" content="Gra do nauki niemieckiego B2.2: słówka, konstrukcje bezokolicznikowe, przedrostki zer-/ver-, rozmowa o pracę.">
+  <meta name="theme-color" content="#111827">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Niemiecki B2">
+  <meta name="format-detection" content="telephone=no">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <button id="backBtn" class="icon-btn" aria-label="Wstecz" hidden>‹</button>
+      <h1 id="title">Niemiecki B2</h1>
+      <div class="chips">
+        <span class="chip streak" id="streakChip" title="Dni nauki z rzędu">0</span>
+        <span class="chip xp" id="xpChip" title="Punkty doświadczenia">0 XP</span>
+      </div>
+    </header>
+    <main id="screen"></main>
+  </div>
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
