@@ -104,7 +104,7 @@ const defaults = () => ({
   rpg: { done: [] },
   errors: {},
   stats: { correct: {}, wrong: {}, errorsFixed: 0 },
-  settings: { dir: "de-pl", sets: VOCAB.map((s) => s.id), sound: true, counts: {}, prefixPl: false },
+  settings: { dir: "de-pl", sets: VOCAB.map((s) => s.id), sound: false, haptics: true, motion: true, counts: {}, prefixPl: false },
 });
 
 let S = load();
@@ -177,22 +177,9 @@ function setBest(key, score) {
 
 /* ================= Sound & speech ================= */
 
-let audioCtx = null;
 function beep(ok) {
-  if (!S.settings.sound) return;
-  try {
-    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
-    const o = audioCtx.createOscillator();
-    const g = audioCtx.createGain();
-    o.type = "sine";
-    o.frequency.value = ok ? 880 : 220;
-    if (ok) o.frequency.setValueAtTime(1175, audioCtx.currentTime + 0.08);
-    g.gain.setValueAtTime(0.12, audioCtx.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.25);
-    o.connect(g).connect(audioCtx.destination);
-    o.start();
-    o.stop(audioCtx.currentTime + 0.25);
-  } catch (e) { /* brak audio */ }
+  if (typeof sfx === "function") sfx(ok ? "ok" : "bad");
+  if (typeof haptic === "function") haptic(ok ? "success" : "error");
 }
 
 let deVoice = null;
@@ -226,7 +213,8 @@ let onBack = null;
 let cleanup = null;
 
 function updateChips() {
-  $("#xpChip").textContent = `${S.xp} XP`;
+  if (typeof tickXP === "function") tickXP();
+  else $("#xpChip").textContent = `${S.xp} XP`;
   $("#streakChip").textContent = `${S.streak.count}`;
 }
 
@@ -238,8 +226,10 @@ function show(title, render, back = home) {
   backBtn.hidden = !back;
   screenEl.innerHTML = "";
   screenEl.className = "";
+  void screenEl.offsetWidth;
   screenEl.scrollTop = 0;
   render(screenEl);
+  screenEl.classList.add("screen-in");
 }
 backBtn.addEventListener("click", () => onBack && onBack());
 
@@ -491,7 +481,7 @@ function runSession(cfg) {
       const step = cfg.steps ? cfg.steps[i] : cfg.gen(i);
       renderHud();
       body.innerHTML = "";
-      const stage = h("div", { class: "stage" });
+      const stage = h("div", { class: "stage slide-in" });
       body.append(stage);
       let doneOnce = false;
       RENDERERS[step.kind](stage, step, {
@@ -521,6 +511,7 @@ function runSession(cfg) {
       if (res.ok) {
         combo++;
         score++;
+        if (typeof celebrate === "function" && combo >= 5 && combo % 5 === 0) celebrate(`Seria ${combo}!`);
         const gain = (step.xp || 10) + (combo >= 3 ? 5 : 0);
         xpGained += gain;
         addXP(gain);
@@ -534,6 +525,11 @@ function runSession(cfg) {
       if (cfg.seconds) {
         setTimeout(() => (outOfLives() ? finish() : next()), res.ok ? 350 : 900);
         return;
+      }
+      if (!res.ok && stage.firstChild && stage.firstChild.classList) {
+        stage.firstChild.classList.remove("shake");
+        void stage.firstChild.offsetWidth;
+        stage.firstChild.classList.add("shake");
       }
       const fb = feedbackEl(res);
       const nextBtn = h("button", { class: "btn primary", style: "margin-top:14px" }, total && i >= total ? "Wynik" : "Dalej");
@@ -552,6 +548,7 @@ function runSession(cfg) {
       body.innerHTML = "";
       hud.innerHTML = "";
       if (cfg.test) return cfg.onFinish(result, body);
+      if (typeof celebrate === "function" && total >= 5 && score === total) celebrate();
       body.append(
         h("div", { class: "card center pop" },
           h("div", { class: "muted" }, cfg.seconds ? "Koniec czasu!" : outOfLives() ? "Koniec żyć!" : "Koniec rundy"),
@@ -940,10 +937,15 @@ function flashSession(random, n) {
       const w = queue[0];
       let flipped = false;
       const box = srsGet(w.key).b;
-      const card = h("div", { class: "card-flip pop" },
+      const backFace = h("div", { class: "face face-back" });
+      const inner = h("div", { class: "flip-inner" },
+        h("div", { class: "face face-front" },
+          h("div", { class: "front" }, toPl ? w.de : w.pl),
+          h("div", { class: "tap" }, "Dotknij, aby odwrócić")),
+        backFace);
+      const card = h("div", { class: "card-flip slide-in" },
         h("div", { class: "box" }, box ? `pudełko ${box}/6` : "nowe"),
-        h("div", { class: "front" }, toPl ? w.de : w.pl),
-        h("div", { class: "tap" }, "Dotknij, aby odwrócić")
+        inner
       );
       const speakBtn = h("button", { class: "speak", "aria-label": "Wymowa" }, "♪");
       speakBtn.addEventListener("click", (e) => { e.stopPropagation(); speak(w.de); });
@@ -958,8 +960,12 @@ function flashSession(random, n) {
       function flip() {
         if (flipped) return;
         flipped = true;
-        card.querySelector(".tap").remove();
-        card.append(h("div", { class: "back pop" }, w.emoji ? h("span", { class: "emo" }, w.emoji, " ") : null, toPl ? w.pl : w.de));
+        backFace.append(
+          h("div", { class: "front-small" }, toPl ? w.de : w.pl),
+          h("div", { class: "back" }, w.emoji ? h("span", { class: "emo" }, w.emoji, " ") : null, toPl ? w.pl : w.de));
+        inner.classList.add("flipped");
+        if (typeof sfx === "function") sfx("flip");
+        if (typeof haptic === "function") haptic("light");
         actions.style.visibility = "visible";
         if (toPl) speak(w.de);
       }
@@ -1698,8 +1704,11 @@ function statsScreen() {
       dirPills(),
       h("div", { class: "section-title" }, "Działy słówek"),
       setPills(),
-      h("div", { class: "section-title" }, "Dźwięk"),
-      togglePill("Dźwięki", () => S.settings.sound, (v) => (S.settings.sound = v)),
+      h("div", { class: "section-title" }, "Dźwięk i efekty"),
+      togglePill("Dźwięki", () => S.settings.sound, (v) => { S.settings.sound = v; if (v && typeof sfx === "function") sfx("ok"); }),
+      togglePill("Wibracje", () => S.settings.haptics !== false, (v) => { S.settings.haptics = v; if (v && typeof haptic === "function") haptic("success"); }),
+      togglePill("Animacje", () => S.settings.motion !== false, (v) => { S.settings.motion = v; applyMotion(); }),
+      h("div", { class: "muted", style: "font-size:13px;margin:6px 4px 0" }, "Jeśli w systemie włączone jest „Ogranicz ruch”, animacje są zawsze wyciszone."),
       h("button", {
         class: "btn red", style: "margin-top:24px",
         onclick: () => { if (confirm("Na pewno usunąć cały postęp?")) { S = defaults(); save(); updateChips(); home(); } },

@@ -278,10 +278,25 @@ button, .tile, .bin, .card-flip, .mode {
   cursor: pointer;
   touch-action: pan-y;
   transition: transform .25s;
+  perspective: 1000px;
 }
+.flip-inner {
+  display: grid; width: 100%;
+  transform-style: preserve-3d;
+  transition: transform .45s cubic-bezier(.3,.7,.2,1);
+}
+.flip-inner.flipped { transform: rotateY(180deg); }
+.flip-inner .face {
+  grid-area: 1 / 1;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  min-height: 200px;
+  -webkit-backface-visibility: hidden; backface-visibility: hidden;
+}
+.flip-inner .face-back { transform: rotateY(180deg); }
 .card-flip .front { font-size: 28px; font-weight: 800; word-break: break-word; }
-.card-flip .back { margin-top: 16px; font-size: 22px; color: var(--gold); font-weight: 600; }
-.card-flip .tap { position: absolute; bottom: 14px; color: var(--muted); font-size: 13px; }
+.card-flip .back { margin-top: 12px; font-size: 26px; color: var(--gold); font-weight: 700; word-break: break-word; }
+.card-flip .front-small { font-size: 17px; color: var(--muted); font-weight: 600; word-break: break-word; }
+.card-flip .tap { margin-top: 18px; color: var(--muted); font-size: 13px; }
 .card-flip .box { position: absolute; top: 12px; left: 14px; color: var(--muted); font-size: 13px; }
 .speak {
   position: absolute; top: 8px; right: 8px;
@@ -600,3 +615,54 @@ table.stats td:last-child { text-align: right; font-weight: 700; }
 .pill.danger { color: #fca5a5; }
 .mono { font-family: ui-monospace, Menlo, monospace; font-size: 12px !important; }
 textarea, input, select { -webkit-user-select: text; user-select: text; }
+
+/* ---------- Animacje i efekty ---------- */
+.haptic-hidden { position: fixed; left: -9999px; top: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+@keyframes screenin { from { opacity: 0; transform: translateX(18px); } to { opacity: 1; transform: none; } }
+@keyframes slidein { from { opacity: 0; transform: translateX(28px); } to { opacity: 1; transform: none; } }
+#screen.screen-in > * { animation: screenin .22s ease-out both; }
+.slide-in { animation: slidein .26s ease-out both; }
+#screen.screen-in > .bank-sticky { animation: none; }
+@keyframes okpulse { 0% { transform: scale(1); } 40% { transform: scale(1.04); } 100% { transform: scale(1); } }
+.opt.ok, .tile.ok, .bin.ok { animation: okpulse .32s ease-out; }
+.opt.ok::after {
+  content: ""; position: absolute; inset: -3px; border-radius: inherit;
+  box-shadow: 0 0 0 3px rgba(34,197,94,.7); opacity: 0;
+  animation: okring .6s ease-out;
+  pointer-events: none;
+}
+.opt { position: relative; }
+@keyframes okring { 0% { opacity: 1; transform: scale(.96); } 100% { opacity: 0; transform: scale(1.08); } }
+.feedback:not(.bad):not(.almost) { animation: pop .2s ease-out, okfade .5s ease-out; }
+@keyframes okfade { from { opacity: .6; } to { opacity: 1; } }
+#xpChip.bump { animation: chipbump .5s ease-out; }
+@keyframes chipbump { 0% { transform: scale(1); } 30% { transform: scale(1.18); } 100% { transform: scale(1); } }
+.confetti { position: fixed; inset: 0; pointer-events: none; z-index: 70; overflow: hidden; }
+.confetti i {
+  position: absolute; top: 62%; width: 8px; height: 12px; border-radius: 2px; opacity: 0;
+  animation: confetto 1.3s cubic-bezier(.2,.6,.4,1) forwards;
+}
+@keyframes confetto {
+  0% { opacity: 1; transform: translate(0, 0) rotate(0); }
+  60% { opacity: 1; }
+  100% { opacity: 0; transform: translate(var(--x), calc(var(--y) + 380px)) rotate(var(--r)); }
+}
+.combo-pop {
+  position: fixed; left: 50%; top: 38%; z-index: 71; pointer-events: none;
+  transform: translate(-50%, -50%);
+  font-size: 34px; font-weight: 900; color: var(--gold);
+  text-shadow: 0 4px 20px rgba(0,0,0,.6);
+  animation: combopop 1.2s ease-out forwards;
+}
+@keyframes combopop {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(.5); }
+  20% { opacity: 1; transform: translate(-50%, -50%) scale(1.15); }
+  70% { opacity: 1; transform: translate(-50%, -60%) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -80%) scale(1); }
+}
+
+body.no-motion *, body.no-motion *::before, body.no-motion *::after { animation: none !important; transition: none !important; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+  .confetti, .combo-pop { display: none; }
+}
