@@ -666,3 +666,32 @@ body.no-motion *, body.no-motion *::before, body.no-motion *::after { animation:
   *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
   .confetti, .combo-pop { display: none; }
 }
+
+/* ---------- Rekruter ---------- */
+.rec-row { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 12px; }
+.rec-avatar { flex: 0 0 auto; width: 44px; height: 44px; border-radius: 50%; background: var(--card2); display: flex; align-items: center; justify-content: center; font-size: 26px; }
+.rec-bubble { flex: 1; min-width: 0; background: #1e3a5f; border-radius: 4px 18px 18px 18px; padding: 12px 14px; }
+.rec-extra { font-size: 12px; color: #fde68a; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 4px; }
+.rec-de { font-size: 19px; font-weight: 700; line-height: 1.35; }
+.rec-pl { margin-top: 6px; color: #bfdbfe; font-size: 15px; }
+.rec-actions { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+.pill.small { padding: 6px 12px; font-size: 13px; margin: 0; }
+.rec-part { display: grid; grid-template-columns: 130px 1fr; gap: 8px; align-items: center; text-align: left; font-size: 13px; color: var(--muted); margin-top: 6px; }
+.rec-part .bar { height: 8px; }
+.transcript-hl { font-size: 17px; line-height: 1.6; }
+.hl-key { background: rgba(245,180,0,.25); color: #fde68a; border-radius: 4px; padding: 0 2px; }
+.hl-inf { background: rgba(59,130,246,.25); color: #bfdbfe; border-radius: 4px; padding: 0 2px; }
+.hl-conn { background: rgba(34,197,94,.22); color: #bbf7d0; border-radius: 4px; padding: 0 2px; }
+.legend { margin-top: 8px; font-size: 12px; color: var(--muted); }
+.rec-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.rec-chip { font-size: 13px; padding: 4px 10px; border-radius: 99px; background: var(--card2); }
+.rec-chip.ok { background: rgba(245,180,0,.2); color: #fde68a; }
+.rec-chip.miss { color: var(--muted); text-decoration: line-through; text-decoration-color: rgba(255,255,255,.25); }
+.rec-chip.inf { background: rgba(59,130,246,.2); color: #bfdbfe; }
+.rec-chip.conn { background: rgba(34,197,94,.2); color: #bbf7d0; }
+.tips { margin-top: 12px; display: grid; gap: 6px; }
+.tip { font-size: 15px; line-height: 1.4; }
+.card.model { line-height: 1.55; }
+.rec-sum-row { display: flex; justify-content: space-between; gap: 10px; padding: 8px 0; border-top: 1px solid rgba(255,255,255,.06); font-size: 14px; }
+.rec-sum-row:first-child { border-top: 0; }
+.ok-text { color: var(--green); }

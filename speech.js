@@ -125,10 +125,16 @@ function micWidget({ onDone, maxMs, allowTyping = true, typingLabel = "Wolę wpi
       msg.textContent = m;
       if (code === "not-allowed" || code === "service-not-allowed") { typeWrap.hidden = false; if (typeToggle) typeToggle.remove(); }
     },
-    onEnd: (fin) => {
+    onEnd: (fin, hadError) => {
       setState(false);
       const text = (fin || lastText).trim();
       if (text) onDone(text, "spoken");
+      else if (!hadError) {
+        msg.hidden = false;
+        msg.className = "warn";
+        msg.textContent = "Nic nie usłyszałem – dotknij mikrofonu i spróbuj jeszcze raz (albo wpisz odpowiedź).";
+        live.textContent = "";
+      }
     },
   });
   function setState(on) {
