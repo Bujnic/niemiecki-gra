@@ -547,3 +547,32 @@ table.stats td:last-child { text-align: right; font-weight: 700; }
 .transcript .interim { color: var(--muted); }
 .mic-wrap .text-input.multi { margin-top: 10px; text-align: left; }
 .score-line { margin-bottom: 6px; }
+
+/* ---------- Odznaki ---------- */
+.badge-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.badge-cell { background: var(--card); border-radius: 16px; padding: 14px 12px; text-align: center; display: flex; flex-direction: column; gap: 4px; align-items: center; }
+.badge-cell b { font-size: 14px; line-height: 1.2; }
+.badge-cell small { color: var(--muted); font-size: 12px; line-height: 1.3; }
+.badge-icon { font-size: 36px; line-height: 1.1; }
+.badge-cell.locked .badge-icon { filter: grayscale(1); opacity: .35; }
+.badge-cell.got { background: linear-gradient(160deg, #3b2f0b, var(--card)); box-shadow: inset 0 0 0 1px rgba(245,180,0,.45); }
+.badge-cell .badge-date { color: var(--gold); }
+.badge-prog { width: 100%; margin-top: 6px; }
+.badge-prog .bar { height: 6px; margin-bottom: 4px; }
+.badge-pop {
+  position: fixed; z-index: 60;
+  left: 50%; top: calc(var(--safe-top) + 64px);
+  transform: translateX(-50%);
+  display: flex; align-items: center; gap: 12px;
+  min-width: 240px; max-width: calc(100% - 32px);
+  padding: 12px 18px; border-radius: 18px;
+  background: linear-gradient(135deg, #f5b400, #f97316); color: #111827;
+  box-shadow: 0 12px 40px rgba(0,0,0,.45);
+  animation: badgein .5s cubic-bezier(.2,1.4,.4,1) both;
+}
+.badge-pop.out { animation: badgeout .28s ease-in both; }
+.badge-pop-icon { font-size: 34px; animation: badgespin .8s ease-out both; }
+.badge-pop-k { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; opacity: .8; }
+@keyframes badgein { from { opacity: 0; transform: translate(-50%, -30px) scale(.8); } to { opacity: 1; transform: translate(-50%, 0) scale(1); } }
+@keyframes badgeout { to { opacity: 0; transform: translate(-50%, -20px) scale(.9); } }
+@keyframes badgespin { from { transform: rotate(-200deg) scale(.3); } to { transform: rotate(0) scale(1); } }

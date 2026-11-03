@@ -142,6 +142,7 @@ function addXP(n) {
   save();
   updateChips();
   if (level() > before) toast(`Nowy poziom: ${level()}!`);
+  if (typeof checkBadges === "function") checkBadges();
 }
 
 const level = () => Math.floor(Math.sqrt(S.xp / 50)) + 1;
@@ -1497,6 +1498,8 @@ function clozeGame(i, opts = {}) {
       const plain = t.a.replace(/[{}]/g, "");
       const bk = "cloze" + i;
       if (S.best[bk] == null || mistakes < S.best[bk]) { S.best[bk] = mistakes; save(); }
+      const pct = Math.round(Math.max(0, gaps.length - mistakes) / gaps.length * 100);
+      if (i < 4) S.stats.interviewPct = Math.max(S.stats.interviewPct || 0, pct);
       recordAnswer({ t: "cloze", i }, mistakes === 0);
       const bonus = Math.max(0, gaps.length * 4 + 20 - mistakes * 5);
       addXP(bonus);
