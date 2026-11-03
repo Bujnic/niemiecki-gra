@@ -90,6 +90,143 @@ EXTRA_MODES.push({
   desc: () => (errorCount() ? `${errorCount()} do poprawy` : "Pomyłki ze wszystkich trybów"),
 });
 
+/* ================= Wpisywanie (PL → DE) ================= */
+
+const ARTICLES = ["der", "die", "das"];
+function foldDe(s) {
+  return String(s).toLowerCase()
+    .replace(/ä/g, "ae").replace(/ö/g, "oe").replace(/ü/g, "ue").replace(/ß/g, "ss")
+    .replace(/[„”"“'’]/g, "").replace(/…|\.\.\./g, " ")
+    .replace(/[.,!?;:]+/g, " ").replace(/\s+/g, " ").trim();
+}
+function levenshtein(a, b) {
+  const m = a.length, n = b.length;
+  if (!m) return n;
+  if (!n) return m;
+  let prev = range(n + 1), cur = new Array(n + 1);
+  for (let i = 1; i <= m; i++) {
+    cur[0] = i;
+    for (let j = 1; j <= n; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    [prev, cur] = [cur, prev];
+  }
+  return prev[n];
+}
+/* Różnice na poziomie liter: <del> = zbędne u ciebie, <ins> = brakujące. */
+function charDiffHTML(given, target) {
+  const a = [...given], b = [...target];
+  const L = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
+  for (let i = a.length - 1; i >= 0; i--)
+    for (let j = b.length - 1; j >= 0; j--)
+      L[i][j] = a[i].toLowerCase() === b[j].toLowerCase() ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+  let i = 0, j = 0, out = "";
+  while (i < a.length && j < b.length) {
+    if (a[i].toLowerCase() === b[j].toLowerCase()) { out += esc(b[j]); i++; j++; }
+    else if (L[i + 1][j] >= L[i][j + 1]) { out += `<del>${esc(a[i])}</del>`; i++; }
+    else { out += `<ins>${esc(b[j])}</ins>`; j++; }
+  }
+  while (i < a.length) out += `<del>${esc(a[i++])}</del>`;
+  while (j < b.length) out += `<ins>${esc(b[j++])}</ins>`;
+  return out;
+}
+const splitArticle = (s) => {
+  const m = s.match(/^(der|die|das)\s+(.+)$/i);
+  return m ? { art: m[1].toLowerCase(), core: m[2] } : { art: null, core: s };
+};
+const variants = (de) => de.replace(/\(.*?\)/g, "").split(/\s+\/\s+/).map((x) => x.trim()).filter(Boolean);
+
+/* Zwraca { status: "ok" | "almost" | "wrong", note, diff, best } */
+function checkTyped(input, target, requireArticle) {
+  const raw = input.trim();
+  let best = null;
+  for (const v of variants(target)) {
+    const t = splitArticle(v), u = splitArticle(raw);
+    const tc = foldDe(t.core), uc = foldDe(u.core);
+    const dist = levenshtein(uc, tc);
+    const tol = tc.length > 8 ? 2 : 1;
+    let status, note = "";
+    if (dist === 0) status = "ok";
+    else if (dist <= tol) { status = "almost"; note = "Prawie dobrze – literówka."; }
+    else status = "wrong";
+    if (status !== "wrong" && t.art) {
+      if (u.art && u.art !== t.art) { status = "almost"; note = `Zły rodzajnik: poprawnie „${t.art}”.` + (dist ? " Do tego literówka." : ""); }
+      else if (!u.art && requireArticle) { status = "almost"; note = `Brakuje rodzajnika: „${t.art}”.` + (dist ? " Do tego literówka." : ""); }
+    }
+    const rank = { ok: 0, almost: 1, wrong: 2 }[status];
+    if (!best || rank < best.rank || (rank === best.rank && dist < best.dist)) best = { status, note, dist, rank, v };
+  }
+  return { status: best.status, note: best.note, best: best.v, diff: charDiffHTML(raw, best.v) };
+}
+
+/* Pole tekstowe bez autokorekty + przyciski ä ö ü ß */
+function germanInput(opts = {}) {
+  const input = h(opts.multiline ? "textarea" : "input", {
+    class: opts.multiline ? "text-input multi" : "text-input",
+    type: "text", autocomplete: "off", autocorrect: "off", autocapitalize: "off", spellcheck: "false",
+    enterkeyhint: "done", lang: "de", placeholder: opts.placeholder || "Wpisz po niemiecku",
+  });
+  const keys = h("div", { class: "umlauts" },
+    ["ä", "ö", "ü", "ß", "Ä", "Ö", "Ü"].map((ch) => {
+      const b = h("button", { class: "key", type: "button" }, ch);
+      b.addEventListener("pointerdown", (e) => e.preventDefault());
+      b.addEventListener("click", () => {
+        const s = input.selectionStart != null ? input.selectionStart : input.value.length;
+        const e = input.selectionEnd != null ? input.selectionEnd : s;
+        input.value = input.value.slice(0, s) + ch + input.value.slice(e);
+        try { input.setSelectionRange(s + 1, s + 1); } catch (err) { /* */ }
+        input.focus();
+      });
+      return b;
+    }));
+  return { input, keys };
+}
+
+RENDERERS.type = (el, step, ctx) => {
+  const w = step.w;
+  const { input, keys } = germanInput();
+  const checkBtn = h("button", { class: "btn primary" }, "Sprawdź");
+  const skipBtn = h("button", { class: "btn ghost" }, "Nie wiem");
+  el.append(
+    h("div", { class: "prompt pop" },
+      h("div", { class: "big" }, w.pl),
+      h("div", { class: "hint" }, `${SET_NAMES[w.set] || ""}${w.art ? " · rzeczownik" : ""}${w.art && S.settings.requireArticle ? " – z rodzajnikiem" : ""}`)),
+    input, keys, checkBtn, skipBtn);
+  let done = false;
+  const finish = (given) => {
+    if (done) return;
+    done = true;
+    input.disabled = true;
+    checkBtn.remove();
+    skipBtn.remove();
+    keys.remove();
+    const r = given ? checkTyped(given, w.de, !!S.settings.requireArticle) : { status: "wrong", note: "", diff: "" };
+    const after = `${w.emoji ? `<span class="emo">${w.emoji}</span> ` : ""}<b>${esc(w.de)}</b> – ${esc(w.pl)}`;
+    ctx.done({
+      ok: r.status !== "wrong",
+      almost: r.status === "almost",
+      almostWhy: r.note,
+      given: r.status === "ok" ? null : given || "",
+      expected: w.de,
+      explain: given && r.status !== "ok" ? `<div class="diff">${r.diff}</div><div class="muted" style="font-size:13px">przekreślone = zbędne, podkreślone = brakujące</div>` : null,
+      after,
+      status: r.status,
+    });
+    if (!ctx.test) speak(w.de);
+  };
+  checkBtn.addEventListener("click", () => { if (input.value.trim()) finish(input.value); else input.focus(); });
+  skipBtn.addEventListener("click", () => finish(""));
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); if (input.value.trim()) finish(input.value); } });
+  input.focus();
+};
+
+function typeStep(w) {
+  return {
+    kind: "type", w, ref: { t: "type", k: w.key },
+    onResult: (ok, res) => { if (!res || !res.almost) srsRecord(w.key, ok); },
+  };
+}
+
 /* ================= Sprawdzian ================= */
 
 const GRAMMAR_TOPICS = [

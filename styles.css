@@ -491,3 +491,33 @@ table.stats td:last-child { text-align: right; font-weight: 700; }
 .shake { animation: shake .25s 2; }
 @keyframes pop { 0% { transform: scale(.9); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
 .pop { animation: pop .2s ease-out; }
+
+/* ---------- Typing ---------- */
+.text-input {
+  width: 100%;
+  min-height: 56px;
+  padding: 12px 14px;
+  border: 2px solid var(--line);
+  border-radius: 14px;
+  background: var(--bg2);
+  color: var(--text);
+  font: inherit;
+  font-size: 20px;
+  -webkit-appearance: none;
+}
+.text-input:focus { outline: none; border-color: var(--blue); }
+.text-input.multi { min-height: 120px; font-size: 18px; resize: vertical; }
+.umlauts { display: flex; gap: 6px; margin: 10px 0 14px; flex-wrap: wrap; }
+.umlauts .key {
+  flex: 1; min-width: 40px; height: 46px;
+  border: 0; border-radius: 10px;
+  background: var(--card2); color: var(--text);
+  font: inherit; font-size: 20px; font-weight: 700;
+}
+.feedback.almost { border-left-color: var(--gold); }
+.diff { font-size: 20px; font-weight: 700; letter-spacing: .5px; margin: 4px 0; word-break: break-word; }
+.diff del { color: var(--red); text-decoration: line-through; }
+.diff ins { color: var(--green); text-decoration: underline; }
+.diff .wok { color: var(--green); }
+.diff .wbad { color: var(--red); text-decoration: line-through; }
+.diff .wmiss { color: var(--gold); text-decoration: underline; }

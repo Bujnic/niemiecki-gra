@@ -425,10 +425,11 @@ function ruleButton(ruleId) {
 
 /* res: { ok, given, expected, alt, explain (html), pickedWhy, rule, after (html) } */
 function feedbackEl(res) {
-  return h("div", { class: `feedback pop ${res.ok ? "" : "bad"}` },
+  return h("div", { class: `feedback pop ${res.almost ? "almost" : res.ok ? "" : "bad"}` },
     h("div", { class: "title" },
+      res.almost ? `Prawie dobrze! ${res.almostWhy || ""}` :
       res.ok ? (res.alt ? `Dobrze! Częściej: ${res.expected}` : "Dobrze!") : res.expected != null ? `Poprawnie: ${res.expected}` : "Nie tym razem"),
-    !res.ok && res.given != null && res.given !== "" ? h("div", { class: "picked" },
+    (!res.ok || res.almost) && res.given != null && res.given !== "" ? h("div", { class: "picked" },
       h("span", { class: "muted" }, "Twoja odpowiedź: "), h("b", null, res.given),
       res.pickedWhy ? h("div", { class: "why-not" }, res.pickedWhy) : null) : null,
     res.explain ? h("div", { class: "explain", html: res.explain }) : null,
@@ -512,7 +513,7 @@ function runSession(cfg) {
         return;
       }
       beep(res.ok);
-      if (step.onResult) step.onResult(res.ok);
+      if (step.onResult) step.onResult(res.ok, res);
       if (step.ref) recordAnswer(step.ref, res.ok);
       if (res.ok) {
         combo++;
@@ -826,13 +827,25 @@ function home() {
 
 const COUNT_STD = (label, def, available) => ({ label, presets: [5, 10, 20, 0], def, available });
 
+function typingOptions(flagKey) {
+  return () => [
+    h("div", { class: "section-title" }, "Sposób odpowiedzi"),
+    togglePill("Wpisuj (polski → niemiecki)", () => !!S.settings[flagKey], (v) => (S.settings[flagKey] = v)),
+    togglePill("Rodzajnik wymagany", () => !!S.settings.requireArticle, (v) => (S.settings.requireArticle = v)),
+  ];
+}
+
 function quizSetup() {
   setupScreen({
     id: "quiz", title: "Quiz słówek", sets: true, dir: true,
     count: COUNT_STD("Ile pytań", 10, () => activeWords().length),
+    options: typingOptions("typeQuiz"),
     buttons: [{ label: (n) => `Start (${n} pytań)`, run: (n) => {
       const pool = activeWords();
-      runSession({ key: "quiz", title: "Quiz słówek", n, gen: vocabGen(pool), back: quizSetup });
+      if (S.settings.typeQuiz) {
+        const deck = makeDeck(pool);
+        runSession({ key: "quizType", title: "Quiz – wpisywanie", n, gen: () => typeStep(deck()), back: quizSetup });
+      } else runSession({ key: "quiz", title: "Quiz słówek", n, gen: vocabGen(pool), back: quizSetup });
     } }],
   });
 }
@@ -886,6 +899,7 @@ function flashSetup() {
         h("div", { class: "muted", style: "margin-top:6px;font-size:15px" }, "Najpierw lecą powtórki, potem nowe słówka. Znane wracają coraz rzadziej, nieznane – szybko."));
     },
     count: { label: "Ile fiszek w sesji", presets: [10, 20, 30, 50, 0], def: 20, available: () => activeWords().length },
+    options: typingOptions("typeFlash"),
     buttons: [
       { label: (n) => `Ucz się (${n} kart)`, available: learnable, run: (n) => flashSession(false, n) },
       { label: (n) => `Losowe ${n} ze wszystkich wybranych`, cls: "ghost", run: (n) => flashSession(true, n) },
@@ -904,6 +918,9 @@ function flashSession(random, n) {
     if (!queue.length) queue = shuffle(pool);
   }
   queue = queue.slice(0, n);
+  if (S.settings.typeFlash) {
+    return runSession({ title: "Fiszki – wpisywanie", steps: queue.map(typeStep), back: flashSetup, again: () => flashSession(random, n) });
+  }
   const toPl = S.settings.dir === "de-pl";
   let known = 0, seen = 0;
 
