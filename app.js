@@ -61,6 +61,7 @@ const WORDS = [];
 const SET_NAMES = {};
 function rebuildWords() {
   WORDS.length = 0;
+  for (const k in SET_NAMES) delete SET_NAMES[k];
   for (const set of VOCAB) {
     SET_NAMES[set.id] = set.name;
     for (const line of set.words) {
@@ -68,6 +69,7 @@ function rebuildWords() {
       if (w) WORDS.push(w);
     }
   }
+  if (typeof addCustomWords === "function") addCustomWords();
 }
 function parseWord(line, setId) {
   const [deRaw, plRaw, emo] = line.split("|").map((s) => s.trim());
