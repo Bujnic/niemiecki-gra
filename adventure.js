@@ -274,6 +274,6 @@ function adventureTile() {
 const homeBeforeAdventure = home;
 home = function () {
   homeBeforeAdventure();
-  const hero = screenEl.querySelector(".hero");
-  if (hero) hero.after(adventureTile());
+  const anchor = screenEl.querySelector(".gift-strip") || screenEl.querySelector(".hero");
+  if (anchor) anchor.after(adventureTile());
 };

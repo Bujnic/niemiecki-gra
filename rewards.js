@@ -114,6 +114,7 @@ function claimReward(lvl, overlay) {
 
 function rewardsScreen() {
   rewardsState();
+  updateGiftChip();
   const lvl = level();
   const next = nextReward();
   show("Nagrody", (el) => {
@@ -160,14 +161,64 @@ function rewardsScreen() {
   });
 }
 
-EXTRA_MODES.push({
-  id: "rewards", name: "Nagrody", badge: "🎁", color: "#fca5a5",
-  run: () => rewardsScreen(),
-  count: () => rewardsWaiting().length,
-  desc: () => {
-    const n = rewardsWaiting().length;
-    if (n) return `${n} ${n === 1 ? "nagroda czeka" : n < 5 ? "nagrody czekają" : "nagród czeka"}!`;
-    const next = nextReward();
-    return next ? `Niespodzianka na poziomie ${next}` : "Wszystko zdobyte";
-  },
-});
+/* ---------- Nagrody na górze: przycisk w pasku i pasek na ekranie głównym ---------- */
+
+const giftPct = () => {
+  const next = nextReward();
+  if (!next) return 100;
+  const prev = [...REWARD_LEVELS].reverse().find((l) => l < next) || 1;
+  return Math.round(clamp((S.xp - levelXP(prev)) / (levelXP(next) - levelXP(prev)), 0, 1) * 100);
+};
+
+function updateGiftChip() {
+  const chip = document.getElementById("giftChip");
+  if (!chip) return;
+  const n = rewardsWaiting().length;
+  chip.classList.toggle("has", n > 0);
+  chip.style.setProperty("--p", giftPct());
+  chip.innerHTML = "";
+  chip.append(h("span", { class: "gift-chip-icon" }, "🎁"));
+  if (n) chip.append(h("span", { class: "gift-chip-n" }, n));
+  chip.setAttribute("aria-label", n ? `Nagrody: ${n} do odebrania` : "Nagrody");
+}
+document.getElementById("giftChip")?.addEventListener("click", () => rewardsScreen());
+
+const updateChipsBeforeRewards = updateChips;
+updateChips = function () {
+  updateChipsBeforeRewards();
+  updateGiftChip();
+};
+
+function giftStrip() {
+  const n = rewardsWaiting().length;
+  const next = nextReward();
+  if (n) {
+    return h("button", { class: "gift-strip has", onclick: rewardsScreen },
+      h("span", { class: "gift-strip-icon gift-wiggle" }, "🎁"),
+      h("span", { class: "gift-strip-body" },
+        h("b", null, `${n} ${n === 1 ? "nagroda czeka" : n < 5 ? "nagrody czekają" : "nagród czeka"}!`),
+        h("small", null, "Stuknij i zobacz, co jest w środku")),
+      h("span", { class: "gift-strip-go" }, "›"));
+  }
+  if (!next) {
+    return h("button", { class: "gift-strip", onclick: rewardsScreen },
+      h("span", { class: "gift-strip-icon" }, "🏆"),
+      h("span", { class: "gift-strip-body" }, h("b", null, "Wszystkie nagrody zdobyte!"), h("small", null, "Zobacz swoje nagrody")),
+      h("span", { class: "gift-strip-go" }, "›"));
+  }
+  const pct = giftPct();
+  return h("button", { class: "gift-strip", onclick: rewardsScreen },
+    h("span", { class: "gift-strip-icon" }, "🎁"),
+    h("span", { class: "gift-strip-body" },
+      h("b", null, `Niespodzianka na poziomie ${next}`),
+      h("span", { class: "bar" }, h("i", { style: `width:${pct}%` }))),
+    h("span", { class: "gift-strip-go" }, `${pct}%`));
+}
+
+const homeBeforeRewards = home;
+home = function () {
+  homeBeforeRewards();
+  const hero = screenEl.querySelector(".hero");
+  if (hero) hero.after(giftStrip());
+  updateGiftChip();
+};

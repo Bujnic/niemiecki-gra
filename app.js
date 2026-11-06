@@ -793,11 +793,14 @@ function home() {
 
     el.append(
       h("div", { class: "hero" },
-        h("div", { class: "lvl" }, h("span", null, `Poziom ${l}`), h("span", null, `${cur} / ${need} XP`)),
-        h("div", { class: "bar" }, h("i", { style: `width:${Math.min(100, (cur / need) * 100)}%` })),
-        h("div", { class: "due" },
-          due ? `Do powtórki: ${due} słówek · ` : "Brak zaległych powtórek · ",
-          `opanowane: ${learned} / ${WORDS.length}`)
+        h("div", { class: "hero-ring", style: `--p:${Math.min(100, Math.round((cur / need) * 100))}` },
+          h("small", null, "poziom"), h("b", null, l)),
+        h("div", { class: "hero-info" },
+          h("div", { class: "lvl" }, h("span", null, `Poziom ${l}`), h("span", null, `${cur} / ${need} XP`)),
+          h("div", { class: "bar" }, h("i", { style: `width:${Math.min(100, (cur / need) * 100)}%` })),
+          h("div", { class: "due" },
+            due ? `Do powtórki: ${due} słówek · ` : "Brak zaległych powtórek · ",
+            `opanowane: ${learned} / ${WORDS.length}`))
       ),
       typeof kolosTile === "function" ? kolosTile() : null,
       h("button", { class: "mode wide", style: "background:linear-gradient(135deg,#7c2d12,#b45309)", onclick: rpgMenu },
