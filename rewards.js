@@ -9,7 +9,7 @@
 const REWARDS = {
   10: { icon: "🍦", name: "Lody Izka" },
   20: { icon: "🍫", name: "Kinderki" },
-  30: { icon: "🍦", name: "3× Lody Izka" },
+  30: { icon: "🥔", name: "Laysy zielona cebulka" },
   40: { icon: "🍨", name: "Lód Oskar" },
   50: { icon: "🍔", name: "Maczek" },
   60: { icon: "🧹", name: "Pakiet: cały dzień sprzątania" },
