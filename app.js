@@ -602,6 +602,8 @@ RENDERERS.mcq = (el, q, ctx) => {
         after: q.after,
         rule: q.rule,
         pickedWhy: !ok && q.whyNot ? q.whyNot(o) : null,
+        points: q.pointsFor ? q.pointsFor(o) : undefined,
+        max: q.maxPoints,
       });
     });
     opts.append(b);
@@ -797,6 +799,7 @@ function home() {
           due ? `Do powtórki: ${due} słówek · ` : "Brak zaległych powtórek · ",
           `opanowane: ${learned} / ${WORDS.length}`)
       ),
+      typeof kolosTile === "function" ? kolosTile() : null,
       h("button", { class: "mode wide", style: "background:linear-gradient(135deg,#7c2d12,#b45309)", onclick: rpgMenu },
         h("span", { class: "badge", style: "background:#fde68a" }, "RPG"),
         h("span", null, h("b", null, "Praktykant w niemieckiej firmie"), h("br"), h("small", { style: "color:#fde68a" }, "6 dni pracy – wszystko z zeszytu w jednej fabule"))
@@ -1149,8 +1152,9 @@ const inRect = (el, x, y) => {
 /* ---------- Sentence builder ---------- */
 
 RENDERERS.builder = (el, step, ctx) => {
-  const target = SENTENCES[step.i];
-  const words = target.split(" ");
+  const target = step.target || SENTENCES[step.i];
+  const words = step.tiles || target.split(" ");
+  const full = (step.prefix ? step.prefix + " " : "") + target;
   let tries = 0;
   let answer = [];
   let pool = shuffle(words.map((w, i) => ({ w, id: i })));
@@ -1161,7 +1165,11 @@ RENDERERS.builder = (el, step, ctx) => {
   const fb = h("div");
   const checkBtn = h("button", { class: "btn primary" }, "Sprawdź");
   const showBtn = h("button", { class: "btn ghost" }, "Pokaż odpowiedź");
-  el.append(h("div", { class: "muted", style: "margin:0 4px 8px;font-size:15px" }, "Dotknij słowa, aby je dodać lub usunąć. Przeciągnij, aby zmienić kolejność."), ansZone, poolZone, checkBtn, showBtn, fb);
+  el.append(...[
+    step.label ? h("div", { class: "prompt", html: step.label }) : null,
+    h("div", { class: "muted", style: "margin:0 4px 8px;font-size:15px" }, "Dotknij słowa, aby je dodać lub usunąć. Przeciągnij, aby zmienić kolejność."),
+    step.prefix ? h("div", { class: "builder-prefix" }, step.prefix, " …") : null,
+    ansZone, poolZone, checkBtn, showBtn, fb].filter(Boolean));
 
   function insertIndex(x, y, exclude) {
     const tiles = [...ansZone.children].filter((t) => t !== exclude && t.classList.contains("tile"));
@@ -1213,8 +1221,9 @@ RENDERERS.builder = (el, step, ctx) => {
     checkBtn.remove();
     showBtn.remove();
     fb.innerHTML = "";
-    ctx.done({ ok, given, expected: target, explain: ok ? `<i>${esc(target)}</i>` : null, after: null });
-    if (ok && !ctx.test) speak(target);
+    const why = step.why ? `<div class="why">${step.why}</div>` : "";
+    ctx.done({ ok, given, expected: full, explain: (ok ? `<i>${esc(full)}</i>` : "") + why || null, after: null, rule: step.rule });
+    if (ok && !ctx.test) speak(full);
   };
 
   checkBtn.addEventListener("click", () => {

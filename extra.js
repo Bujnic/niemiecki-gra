@@ -61,6 +61,7 @@ function recordAnswer(ref, ok) {
   if (typeof checkBadges === "function") checkBadges();
 }
 
+const STEP_FROM_REF = {};
 const errorList = () => Object.values(S.errors);
 const errorCount = () => errorList().length;
 
@@ -81,7 +82,7 @@ function stepFromRef(ref) {
     case "builder": return SENTENCES[ref.i] ? builderStep(ref.i) : null;
     case "type": return w && typeof typeStep === "function" ? typeStep(w) : null;
     case "dict": return typeof dictStepFromRef === "function" ? dictStepFromRef(ref) : null;
-    default: return null;
+    default: return STEP_FROM_REF[ref.t] ? STEP_FROM_REF[ref.t](ref) : null;
   }
 }
 
@@ -431,6 +432,7 @@ function topicPills(onChange) {
 }
 
 function stepPromptHTML(step) {
+  if (step.reviewPrompt) return step.reviewPrompt;
   if (step.kind === "mcq") return step.prompt;
   if (step.kind === "builder") return `<div class="hint">Ułóż zdanie</div>`;
   if (step.kind === "prefix") return `<div class="big">${esc(PREFIX_ITEMS[step.i].w)}</div>`;
