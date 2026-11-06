@@ -1,5 +1,5 @@
 // Zwiększ VERSION po każdej zmianie plików, żeby telefon pobrał nową wersję.
-const VERSION = "v17";
+const VERSION = "v18";
 const CACHE = `niemiecki-b2-${VERSION}`;
 const FILES = [
   "./",
@@ -37,18 +37,22 @@ self.addEventListener("activate", (e) => {
   );
 });
 
+// Najpierw internet: zawsze świeża wersja gry, a bez internetu – ostatnia zapisana kopia.
 self.addEventListener("fetch", (e) => {
   if (e.request.method !== "GET") return;
+  const sameOrigin = new URL(e.request.url).origin === location.origin;
+  if (!sameOrigin) return;
   e.respondWith(
-    caches.match(e.request, { ignoreSearch: true }).then((hit) =>
-      hit ||
-      fetch(e.request).then((res) => {
-        if (res.ok && new URL(e.request.url).origin === location.origin) {
+    fetch(e.request, { cache: "no-cache" })
+      .then((res) => {
+        if (res.ok) {
           const copy = res.clone();
           caches.open(CACHE).then((c) => c.put(e.request, copy));
         }
         return res;
-      }).catch(() => caches.match("index.html"))
-    )
+      })
+      .catch(() =>
+        caches.match(e.request, { ignoreSearch: true }).then((hit) => hit || caches.match("index.html"))
+      )
   );
 });

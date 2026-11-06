@@ -1740,5 +1740,11 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
+  /* Gdy przyjdzie nowa wersja gry, przeładuj stronę raz, żeby od razu ją pokazać. */
+  let hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (hadController) location.reload();
+    hadController = true;
+  });
   window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
 }
