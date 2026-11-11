@@ -150,3 +150,5 @@
 @media (prefers-reduced-motion: reduce) {
   .gift-wiggle, .reward-row.waiting .reward-icon, .adv-node.cur, .adv-you, .gift-box.shaking { animation: none; }
 }
+.adv-resume { display: grid; gap: 6px; margin-bottom: 12px; border: 2px solid var(--gold); }
+.adv-resume .btn { margin: 4px 0 0; }

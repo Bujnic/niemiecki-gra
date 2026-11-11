@@ -108,6 +108,15 @@ const advUnlocked = (lv) => lv === 1 || advDone(lv - 1);
 const advCurrent = () => { for (let lv = 1; lv <= ADV_LEVELS; lv++) if (!advDone(lv)) return lv; return ADV_LEVELS; };
 const advTotalStars = () => Object.values(advState().stars).reduce((a, b) => a + b, 0);
 const advAllDone = () => advDone(ADV_LEVELS);
+/* Niedokończony poziom: pytania jako ref (stepFromRef), numer pytania, punkty, życia. */
+function advRun(lv) {
+  const r = advState().run;
+  if (!r || (lv != null && r.lv !== lv) || !advUnlocked(r.lv) || !Array.isArray(r.refs) || r.i >= r.refs.length) return null;
+  return r;
+}
+function advClearRun() {
+  if (advState().run) { delete advState().run; save(); }
+}
 const starStr = (n, max = 3) => "★".repeat(n) + "☆".repeat(max - n);
 
 /* ---------- Mapa ---------- */
@@ -123,6 +132,14 @@ function advMap() {
     el.append(h("div", { class: "adv-top" },
       h("div", null, h("b", null, advAllDone() ? "Przygoda ukończona!" : `Poziom ${cur} / ${ADV_LEVELS}`), h("small", { class: "muted" }, ADV_CHAPTERS[curCh].name)),
       h("div", { class: "adv-stars" }, `★ ${advTotalStars()}`, h("small", { class: "muted" }, ` / ${ADV_LEVELS * 3}`))));
+
+    const run = advRun();
+    if (run) {
+      el.append(h("div", { class: "card adv-resume" },
+        h("b", null, `Niedokończony poziom ${run.lv}`),
+        h("div", { class: "muted" }, `Pytanie ${run.i + 1} z ${run.refs.length} · ${run.score} pkt`),
+        h("button", { class: "btn primary", onclick: () => advPlay(run.lv, true) }, "Kontynuuj")));
+    }
 
     let curNode = null;
     for (let ch = 0; ch <= curCh; ch++) {
@@ -197,27 +214,46 @@ function advIntro(lv) {
         L.seconds ? h("div", null, "⏱️ ", `Czas: ${L.seconds} sekund`) : null,
         L.boss ? h("div", null, "🎲 ", "Pytania ze wszystkich trybów naraz") : null,
         h("div", null, "⭐ ", advDone(lv) ? `Twój wynik: ${starStr(advStars(lv))}` : `Nagroda: +${advBonus(lv)} XP za pierwsze przejście`)),
-      h("button", { class: "btn primary", onclick: () => advPlay(lv) }, advDone(lv) ? "Zagraj jeszcze raz" : "Start"),
+      ...(advRun(lv)
+        ? [h("button", { class: "btn primary", onclick: () => advPlay(lv, true) }, `Kontynuuj (pytanie ${advRun(lv).i + 1}/${advRun(lv).refs.length})`),
+          h("button", { class: "btn", onclick: () => { advClearRun(); advPlay(lv); } }, "Zacznij od nowa")]
+        : [h("button", { class: "btn primary", onclick: () => advPlay(lv) }, advDone(lv) ? "Zagraj jeszcze raz" : "Start")]),
       h("button", { class: "btn ghost", onclick: advMap }, "Mapa"));
   }, advMap);
 }
 
 const advBonus = (lv) => (advIsBoss(lv) ? 100 + advChapterOf(lv) * 25 : 15 + advChapterOf(lv) * 5);
 
-function advPlay(lv) {
+function advPlay(lv, resume = false) {
   const L = advLevel(lv);
-  const cfg = { title: L.boss ? `Boss · poziom ${lv}` : `Poziom ${lv} · ${L.name}`, back: advMap, lives: L.lives || 0, onFinish: (r, body) => advFinish(lv, r, body) };
-  if (L.boss) {
-    const mix = ADV_BOSS_MIX;
-    cfg.steps = Array.from({ length: L.n }, (_, k) => ADV_TASKS[mix[(k + lv) % mix.length]].step());
-    cfg.steps = shuffle(cfg.steps);
-  } else if (L.seconds) {
+  const cfg = { title: L.boss ? `Boss · poziom ${lv}` : `Poziom ${lv} · ${L.name}`, back: advMap, lives: L.lives || 0,
+    onFinish: (r, body) => { advClearRun(); advFinish(lv, r, body); } };
+  if (L.seconds) {
+    advClearRun();
     cfg.seconds = L.seconds;
     cfg.gen = ADV_TASKS.article.gen(lv);
-  } else {
-    cfg.n = L.n;
-    cfg.gen = ADV_TASKS[L.type].gen(lv);
+    return runSession(cfg);
   }
+  const run = resume ? advRun(lv) : null;
+  let steps = run ? run.refs.map((ref) => stepFromRef(ref)) : null;
+  if (!steps || steps.some((x) => !x)) {
+    if (L.boss) {
+      const mix = ADV_BOSS_MIX;
+      steps = shuffle(Array.from({ length: L.n }, (_, k) => ADV_TASKS[mix[(k + lv) % mix.length]].step()));
+    } else {
+      const gen = ADV_TASKS[L.type].gen(lv);
+      steps = Array.from({ length: L.n }, (_, k) => gen(k));
+    }
+    advState().run = steps.every((x) => x.ref)
+      ? { lv, refs: steps.map((x) => x.ref), i: 0, score: 0, lives: L.lives || 0 }
+      : undefined;
+    save();
+  } else cfg.start = { i: run.i, score: run.score, lives: run.lives };
+  cfg.steps = steps;
+  cfg.onProgress = (p) => {
+    const cur = advState().run;
+    if (cur && cur.lv === lv) { Object.assign(cur, p); save(); }
+  };
   runSession(cfg);
 }
 

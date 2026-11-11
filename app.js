@@ -211,6 +211,8 @@ const titleEl = $("#title");
 const backBtn = $("#backBtn");
 let onBack = null;
 let cleanup = null;
+let inSession = false;
+let reloadPending = false;
 
 function updateChips() {
   if (typeof tickXP === "function") tickXP();
@@ -228,8 +230,10 @@ function show(title, render, back = home) {
   screenEl.className = "";
   void screenEl.offsetWidth;
   screenEl.scrollTop = 0;
+  inSession = false;
   render(screenEl);
   screenEl.classList.add("screen-in");
+  if (reloadPending && !inSession) { save(); location.reload(); }
 }
 backBtn.addEventListener("click", () => onBack && onBack());
 
@@ -442,7 +446,9 @@ const RENDERERS = {};
 function runSession(cfg) {
   const back = cfg.back || home;
   show(cfg.title, (el) => {
-    let i = 0, score = 0, lives = cfg.lives || 0, combo = 0, xpGained = 0, answered = 0;
+    inSession = true;
+    const st = cfg.start || {};
+    let i = st.i || 0, score = st.score || 0, lives = st.lives != null ? st.lives : cfg.lives || 0, combo = 0, xpGained = 0, answered = i;
     let timeLeft = cfg.seconds || 0, timerId = null, finished = false;
     const total = cfg.steps ? cfg.steps.length : cfg.n || 0;
     const log = [];
@@ -521,6 +527,7 @@ function runSession(cfg) {
       }
       i++;
       renderHud();
+      if (cfg.onProgress) cfg.onProgress({ i, score, lives });
 
       if (cfg.seconds) {
         setTimeout(() => (outOfLives() ? finish() : next()), res.ok ? 350 : 900);
@@ -542,6 +549,7 @@ function runSession(cfg) {
     function finish() {
       if (finished) return;
       finished = true;
+      inSession = false;
       if (timerId) clearInterval(timerId);
       const record = cfg.key ? setBest(cfg.key, score) : false;
       const result = { score, answered, total: total || answered, xp: xpGained, log };
@@ -1628,14 +1636,14 @@ function rpgDay(i) {
     if (ok && !S.rpg.done.includes(i)) { S.rpg.done.push(i); addXP(50); save(); }
   };
   const after = (ok, body) => {
-    body.append(
+    body.append(...[
       h("div", { class: `feedback pop ${ok ? "" : "bad"}` },
         h("div", { class: "title" }, ok ? "Dzień zaliczony!" : "Nie tym razem…"),
         ok ? (i + 1 < DAYS.length ? "Szef jest zadowolony. Jutro nowe wyzwanie." : "Dostajesz stałą umowę!") : "Potrzebujesz co najmniej 60%. Spróbuj jeszcze raz."),
       ok && i + 1 < DAYS.length ? h("button", { class: "btn primary", style: "margin-top:12px", onclick: () => rpgDay(i + 1) }, `Dzień ${i + 2}`) : null,
       !ok ? h("button", { class: "btn primary", style: "margin-top:12px", onclick: () => rpgDay(i) }, "Powtórz dzień") : null,
-      h("button", { class: "btn ghost", onclick: rpgMenu }, "Mapa praktyk")
-    );
+      h("button", { class: "btn ghost", onclick: rpgMenu }, "Mapa praktyk"),
+    ].filter(Boolean));
   };
 
   if (d.cloze) {
@@ -1734,6 +1742,11 @@ function statsScreen() {
 document.addEventListener("dblclick", (e) => e.preventDefault(), { passive: false });
 document.addEventListener("gesturestart", (e) => e.preventDefault());
 
+/* iOS nie wywołuje beforeunload – zapisujemy przy schowaniu aplikacji. */
+document.addEventListener("visibilitychange", () => { if (document.hidden) save(); });
+window.addEventListener("pagehide", save);
+if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+
 document.addEventListener("DOMContentLoaded", () => {
   updateChips();
   home();
@@ -1743,7 +1756,10 @@ if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
   /* Gdy przyjdzie nowa wersja gry, przeładuj stronę raz, żeby od razu ją pokazać. */
   let hadController = !!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener("controllerchange", () => {
-    if (hadController) location.reload();
+    if (hadController) {
+      if (inSession) reloadPending = true;
+      else { save(); location.reload(); }
+    }
     hadController = true;
   });
   window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
