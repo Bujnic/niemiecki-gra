@@ -423,6 +423,40 @@ const VOCAB = [
       "zu unserem Bedauern | ku naszemu ubolewaniu, niestety",
     ],
   },
+  {
+    id: "garantie",
+    name: "Gwarancja i reklamacja",
+    words: [
+      "der Hersteller | producent",
+      "untersuchen | badać, sprawdzać",
+      "sich an jemanden wenden | zwracać się do kogoś (np. z prośbą)",
+      "den Betrag überweisen | przelać kwotę",
+      "augenblicklich | natychmiast, w tej chwili",
+      "weder … noch | ani … ani",
+      "darstellen | przedstawiać",
+      "die Angelegenheit | sprawa",
+      "die Anfahrt | dojazd",
+      "der Aufpreis | dopłata",
+      "die Beteiligung | udział",
+      "die Frachtkosten (pl) | koszty transportu",
+      "die Garantie | gwarancja",
+      "die Gesprächsnotiz | notatka z rozmowy",
+      "die Gewährleistung | rękojmia",
+      "der Händler | sprzedawca",
+      "das Kaufdatum | data zakupu",
+      "der Käufer | kupujący",
+      "der Kaufzeitpunkt | moment zakupu",
+      "der Kundendienst | obsługa klienta",
+      "die Mängelbeseitigung | usunięcie wady",
+      "der Nachweis | dowód, potwierdzenie",
+      "die Quittung | paragon",
+      "der Zeitraum | okres (czasu)",
+      "gesetzlich | ustawowo, prawnie",
+      "kulant | wyrozumiały, ugodowy",
+      "die Kosten übernehmen | przejąć koszty",
+      "sich kulant zeigen | pójść klientowi na rękę",
+    ],
+  },
 ];
 
 /* KOLOKACJE: rzeczownik + czasownik. "gap" to słowo, które trzeba wybrać. */
@@ -461,6 +495,11 @@ const COLLOCATIONS = [
   { stem: "gesetzliche Vorgaben ___", gap: "einhalten", pl: "przestrzegać przepisów" },
   { stem: "Projekte ___", gap: "entwerfen", pl: "tworzyć projekty" },
   { stem: "eine Geschäftsbeziehung ___", gap: "entwickeln", pl: "rozwijać relację biznesową" },
+  { stem: "sich an den Kundendienst ___", gap: "wenden", pl: "zwrócić się do obsługi klienta" },
+  { stem: "den Betrag ___", gap: "überweisen", pl: "przelać kwotę" },
+  { stem: "die Kosten ___", gap: "übernehmen", pl: "przejąć koszty" },
+  { stem: "sich kulant ___", gap: "zeigen", pl: "pójść klientowi na rękę" },
+  { stem: "einen Mangel ___", gap: "beseitigen", pl: "usunąć wadę" },
 ];
 
 /* SPÓJNIKI: dwa zdania → jak je połączyć.
@@ -679,6 +718,10 @@ const SENTENCES = [
   "Der Arzt rät dem Patienten, möglichst schnell eine Therapie zu machen.",
   "Wir haben vor, den Urlaub aktiv in den Bergen zu verbringen.",
   "Es macht für mich absolut Sinn, eine gute Balance zu finden.",
+  "Bitte wenden Sie sich mit der Quittung an den Kundendienst.",
+  "Der Hersteller übernimmt die Kosten für die Mängelbeseitigung.",
+  "Wir zeigen uns kulant, obwohl die Garantie abgelaufen ist.",
+  "Bitte überweisen Sie den Betrag innerhalb von 14 Tagen.",
 ];
 
 /* PRZEDROSTKI zer- / ver-. bin: "zer" (zniszczenie), "verFehler" (błąd/pomyłka), "verWeg" (oddalenie/opuszczenie) */
@@ -889,6 +932,14 @@ const EMOJI = {
   "den Retourenschein ausdrucken": "🖨️",
   "die Rücksendung": "📮",
   "sich mit dem Kundendienst in Verbindung setzen": "☎️",
+  "der Hersteller": "🏭",
+  "die Garantie": "🛡️",
+  "die Quittung": "🧾",
+  "die Frachtkosten": "🚚",
+  "der Kundendienst": "🎧",
+  "das Kaufdatum": "📅",
+  "die Gesprächsnotiz": "📝",
+  "die Anfahrt": "🚗",
   "versalzen": "🧂",
   "zerbrochen": "🥛",
   "der Lieferschein": "🧾",

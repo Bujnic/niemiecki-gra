@@ -10,6 +10,7 @@
   for (const v of VOCAB) {
     if (!known.includes(v.id)) {
       if (!S.settings.sets.includes(v.id)) S.settings.sets.push(v.id);
+      if (S.settings.testTopics && !S.settings.testTopics.includes("v:" + v.id)) S.settings.testTopics.push("v:" + v.id);
       changed = true;
     }
   }
