@@ -152,3 +152,6 @@
 }
 .adv-resume { display: grid; gap: 6px; margin-bottom: 12px; border: 2px solid var(--gold); }
 .adv-resume .btn { margin: 4px 0 0; }
+.adv-more { margin-left: 10px; background: none; border: 0; color: var(--muted); font-size: 22px; line-height: 1; padding: 4px 6px; cursor: pointer; }
+.adv-restore { display: grid; gap: 8px; margin-bottom: 12px; }
+.adv-restore[hidden] { display: none; }

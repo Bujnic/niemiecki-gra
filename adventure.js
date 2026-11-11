@@ -117,6 +117,46 @@ function advRun(lv) {
 function advClearRun() {
   if (advState().run) { delete advState().run; save(); }
 }
+/* Przywrócenie postępu: poziomy 1..n-1 zaliczone (min. 1 gwiazdka), bez XP i bez obniżania wyników. */
+function advRestore(n) {
+  n = Math.max(1, Math.min(ADV_LEVELS, Math.floor(+n) || 0));
+  if (n <= 1) return false;
+  let changed = false;
+  for (let lv = 1; lv < n; lv++) if (!advDone(lv)) { advState().stars[lv] = 1; changed = true; }
+  if (changed) save();
+  return true;
+}
+function advRestoreFromUrl() {
+  const m = (location.search + "&" + location.hash).match(/[?&#]przygoda=(\d+)/);
+  if (!m) return;
+  const n = +m[1];
+  if (advRestore(n)) toast(`Odblokowano poziom ${Math.min(n, ADV_LEVELS)} w Przygodzie`);
+  try {
+    const url = new URL(location.href);
+    url.searchParams.delete("przygoda");
+    url.hash = url.hash.replace(/#?&?przygoda=\d+/, "");
+    history.replaceState(null, "", url.pathname + url.search + (url.hash && url.hash !== "#" ? url.hash : ""));
+  } catch (e) { /* file:// */ }
+}
+document.addEventListener("DOMContentLoaded", () => { advRestoreFromUrl(); home(); });
+
+function advRestoreCard() {
+  const input = h("input", { class: "text-input", type: "number", min: "2", max: String(ADV_LEVELS), inputmode: "numeric", placeholder: "np. 6" });
+  const card = h("div", { class: "card adv-restore", hidden: true },
+    h("b", null, "Przywróć postęp"),
+    h("div", { class: "muted" }, "Wpisz poziom, od którego chcesz grać. Wcześniejsze poziomy zostaną zaliczone (1 gwiazdka, bez XP). Lepsze wyniki się nie zmienią."),
+    input,
+    h("button", { class: "btn primary", onclick: () => {
+      const n = Math.floor(+input.value);
+      if (!(n >= 2 && n <= ADV_LEVELS)) return toast(`Wpisz liczbę od 2 do ${ADV_LEVELS}`);
+      if (!confirm(`Zaliczyć poziomy 1–${n - 1} i odblokować poziom ${n}?`)) return;
+      advRestore(n);
+      toast(`Odblokowano poziom ${n} w Przygodzie`);
+      advMap();
+    } }, "Przywróć"));
+  return card;
+}
+
 const starStr = (n, max = 3) => "★".repeat(n) + "☆".repeat(max - n);
 
 /* ---------- Mapa ---------- */
@@ -131,7 +171,10 @@ function advMap() {
     el.classList.add("adv-screen");
     el.append(h("div", { class: "adv-top" },
       h("div", null, h("b", null, advAllDone() ? "Przygoda ukończona!" : `Poziom ${cur} / ${ADV_LEVELS}`), h("small", { class: "muted" }, ADV_CHAPTERS[curCh].name)),
-      h("div", { class: "adv-stars" }, `★ ${advTotalStars()}`, h("small", { class: "muted" }, ` / ${ADV_LEVELS * 3}`))));
+      h("div", { class: "adv-stars" }, `★ ${advTotalStars()}`, h("small", { class: "muted" }, ` / ${ADV_LEVELS * 3}`),
+        h("button", { class: "adv-more", "aria-label": "Więcej opcji", onclick: () => { restore.hidden = !restore.hidden; } }, "⋯"))));
+    const restore = advRestoreCard();
+    el.append(restore);
 
     const run = advRun();
     if (run) {
